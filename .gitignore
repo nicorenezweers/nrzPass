@@ -1,0 +1,8 @@
+/target
+/node_modules
+/dist
+/data
+.DS_Store
+*.dmg
+/tools/icongen/target
+/crates/desktop/gen

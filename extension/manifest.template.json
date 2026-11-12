@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "nrzPass",
+  "version": "@VERSION@",
+  "description": "Passwort-Manager mit Ende-zu-Ende-Verschlüsselung: erkennt Login-Felder, füllt aus, schlägt starke Passwörter vor. Vaultwarden-kompatibel.",
+  "icons": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "nrzPass",
+    "default_icon": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png" }
+  },
+  "content_scripts": [
+    { "matches": ["http://*/*", "https://*/*"], "js": ["content.js"], "run_at": "document_idle", "all_frames": true }
+  ],
+  "web_accessible_resources": [
+    { "resources": ["content/nrzpass_content.js", "content/nrzpass_content_bg.wasm"], "matches": ["http://*/*", "https://*/*"] }
+  ],
+  "permissions": ["storage", "tabs", "activeTab", "alarms", "clipboardWrite"],
+  "host_permissions": ["<all_urls>"],
+  "content_security_policy": { "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'" },
+  "commands": {
+    "_execute_action": { "suggested_key": { "default": "Ctrl+Shift+L", "mac": "Command+Shift+L" }, "description": "nrzPass öffnen" }
+  }
+}

@@ -1,0 +1,31 @@
+[package]
+name = "nrzpass-core"
+description = "nrzPass: Bitwarden/Vaultwarden-kompatible Kryptografie, Datenmodelle, Generator, TOTP und Formularerkennung"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+hmac = "0.12"
+sha1 = { version = "0.10", features = ["oid"] }
+sha2 = { version = "0.10", features = ["oid"] }
+hkdf = "0.12"
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+argon2 = { version = "0.5", default-features = false, features = ["alloc"] }
+rsa = { version = "0.9", default-features = false, features = ["std", "pem"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+getrandom = "0.2"
+subtle = "2"
+thiserror = "2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+uuid = { version = "1", features = ["v4", "serde", "js"] }

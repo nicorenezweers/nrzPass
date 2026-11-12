@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="de" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#141414">
+  <meta name="color-scheme" content="dark">
+  <meta name="referrer" content="no-referrer">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="nrzPass">
+  <title>nrzPass</title>
+  <link rel="icon" href="/assets/brand/icon-32.png" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png" sizes="180x180">
+  <link rel="manifest" href="/site.webmanifest">
+  <link data-trunk rel="copy-dir" href="assets/fonts" data-target-path="assets/fonts">
+  <link data-trunk rel="copy-dir" href="assets/brand" data-target-path="assets/brand">
+  <link data-trunk rel="copy-file" href="assets/site.webmanifest">
+  <link data-trunk rel="css" href="assets/app.css">
+  <link data-trunk rel="rust" data-wasm-opt="3" data-wasm-opt-params="--enable-bulk-memory --enable-bulk-memory-opt --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals --enable-reference-types --enable-multivalue" data-bin="nrzpass-web" data-cargo-profile="wasm-release" />
+</head>
+<body class="bg-background text-foreground font-sans antialiased"></body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "store": "nicorenezweers/nrzStore",
+  "app": "nrz-pass",
+  "tagPrefix": "umbrel-",
+  "package": "umbrel",
+  "releaseNotes": "Erste Version: Web-Tresor, macOS-App, Browser-Erweiterung, Vaultwarden-Konten, Zwei-Faktor, Import/Export und Sicherheitsbericht.",
+  "manifest": {
+    "tagline": "Passwort-Manager in Rust - Zero-Knowledge, Vaultwarden-kompatibel",
+    "icon": "http://100.78.107.162:8390/nicorenezweers/nrzStore/raw/branch/main/nrz-pass/icon.png",
+    "port": 8490
+  }
+}

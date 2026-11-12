@@ -1,0 +1,11 @@
+[package]
+name = "icongen"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Eigenstaendiges Werkzeug (nicht Teil des Workspaces): rendert die nrzPass-Symbole aus SVG.
+[workspace]
+
+[dependencies]
+resvg = "0.45"
