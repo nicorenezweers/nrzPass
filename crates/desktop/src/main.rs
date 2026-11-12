@@ -10,6 +10,7 @@ use tauri::Manager;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
+use tauri_plugin_updater::UpdaterExt;
 
 const MAX_BODY: usize = 20 * 1024 * 1024;
 
@@ -103,6 +104,42 @@ fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
     app.opener().open_url(u.as_str(), None::<&str>).map_err(|e| e.to_string())
 }
 
+#[derive(Serialize)]
+struct UpdateInfo {
+    current: String,
+    available: bool,
+    version: Option<String>,
+    notes: Option<String>,
+    date: Option<String>,
+}
+
+/// Fragt nrzGit nach einer neueren Version (latest.json auf dem Zweig `umbrel`).
+/// Die Pakete sind mit dem nrzPass-Schluessel (minisign) signiert; ohne gueltige Signatur
+/// installiert die App nichts – deshalb ist auch http:// im Heimnetz unbedenklich.
+#[tauri::command]
+async fn update_check(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
+    let current = app.package_info().version.to_string();
+    let update = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| format!("nrzGit nicht erreichbar: {e}"))?;
+    Ok(match update {
+        Some(u) => UpdateInfo { current, available: true, version: Some(u.version.clone()), notes: u.body.clone(), date: u.date.map(|d| d.to_string()) },
+        None => UpdateInfo { current, available: false, version: None, notes: None, date: None },
+    })
+}
+
+/// Laedt das Update, prueft die Signatur, ersetzt die App und startet neu.
+#[tauri::command]
+async fn update_install(app: tauri::AppHandle) -> Result<(), String> {
+    let update = app
+        .updater()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| format!("nrzGit nicht erreichbar: {e}"))?
+        .ok_or("Kein Update verfügbar")?;
+    update.download_and_install(|_, _| {}, || {}).await.map_err(|e| format!("Update fehlgeschlagen: {e}"))?;
+    app.restart();
+}
+
 fn main() {
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -117,8 +154,9 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(client)
-        .invoke_handler(tauri::generate_handler![http_request, clipboard_write, save_file, open_url])
+        .invoke_handler(tauri::generate_handler![http_request, clipboard_write, save_file, open_url, update_check, update_install])
         .setup(|app| {
             if let Some(w) = app.get_webview_window("main") {
                 // Kein Bildschirmfoto / keine Bildschirmfreigabe des Tresors

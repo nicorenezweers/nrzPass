@@ -76,6 +76,8 @@ pub struct Settings {
     pub use_passphrase: bool,
     /// Server fuer Tauri/Erweiterung (auf der Webseite der eigene Ursprung).
     pub last_server: String,
+    /// Letzte automatische Update-Pruefung (ms seit 1970).
+    pub last_update_check: f64,
 }
 
 impl Default for Settings {
@@ -88,6 +90,7 @@ impl Default for Settings {
             passphrase: Default::default(),
             use_passphrase: false,
             last_server: String::new(),
+            last_update_check: 0.0,
         }
     }
 }
@@ -223,6 +226,8 @@ pub struct App {
     /// Aktiver Tab (nur Erweiterung): ID und Adresse.
     pub tab: RwSignal<Option<(i32, String)>>,
     pub nav_open: RwSignal<bool>,
+    /// Gefundenes Update (macOS-App / Erweiterung).
+    pub update: RwSignal<Option<crate::updates::UpdateInfo>>,
 }
 
 pub fn app() -> App {
@@ -249,6 +254,7 @@ impl App {
             hidden_since: StoredValue::new(None),
             tab: RwSignal::new(None),
             nav_open: RwSignal::new(false),
+            update: RwSignal::new(None),
         }
     }
 
@@ -458,6 +464,7 @@ impl App {
             env::store_set(Area::Session, EXT_KEYS, &json!({ "userKey": user_key.to_b64().as_str() }).to_string()).await;
         }
         self.sync_all().await;
+        crate::updates::auto_check(*self);
         Ok(())
     }
 

@@ -289,6 +289,7 @@ pub fn Shell() -> impl IntoView {
                     </div>
                     <div class="min-h-0 flex-1"><Sidebar /></div>
                     <div class="border-t border-border p-3">
+                        <UpdateBanner />
                         <Button variant=ButtonVariant::Ghost class="w-full justify-start" on_click=Callback::new(move |_| app.lock())><Icon name="lock" />"Sperren"</Button>
                     </div>
                 </aside>
@@ -302,6 +303,12 @@ pub fn Shell() -> impl IntoView {
                 {popup.then(|| view! {
                     <Button variant=ButtonVariant::Ghost size=ButtonSize::Icon title="Im Tab öffnen" on_click=Callback::new(|_| env::open_extension_tab())><Icon name="external" /></Button>
                 })}
+                <Show when=move || app.update.get().is_some()>
+                    <Button variant=ButtonVariant::Ghost size=ButtonSize::Icon class="relative text-success" title="Update verfügbar"
+                        on_click=Callback::new(move |_| app.view.set(View::Settings))>
+                        <Icon name="download" /><span class="absolute right-1 top-1 size-1.5 rounded-full bg-success"></span>
+                    </Button>
+                </Show>
                 <Button variant=ButtonVariant::Ghost size=ButtonSize::Icon title="Sperren" on_click=Callback::new(move |_| app.lock())><Icon name="lock" /></Button>
             </header>
 
@@ -352,5 +359,20 @@ pub fn Toasts() -> impl IntoView {
                 </div>
             } />
         </div>
+    }
+}
+
+/// Hinweis "Update verfuegbar" (fuehrt zu den Einstellungen).
+#[component]
+fn UpdateBanner() -> impl IntoView {
+    let app = app();
+    view! {
+        <Show when=move || app.update.get().is_some()>
+            <button class="mb-2 flex w-full items-center gap-2.5 rounded-md border border-success/30 bg-success/10 px-2.5 py-2 text-left text-sm text-success cursor-pointer hover:bg-success/15"
+                on:click=move |_| app.view.set(View::Settings)>
+                <Icon name="download" />
+                <span class="flex-1">{move || format!("Update {} verfügbar", app.update.get().map(|u| u.version).unwrap_or_default())}</span>
+            </button>
+        </Show>
     }
 }

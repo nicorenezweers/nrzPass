@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "nrzPass",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "identifier": "ch.zweers.nrzpass",
   "build": {
     "frontendDist": "../../dist/web"
@@ -28,14 +28,33 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": [
+      "app",
+      "dmg"
+    ],
     "category": "Utility",
     "shortDescription": "Passwort-Manager, Vaultwarden-kompatibel",
     "longDescription": "nrzPass: Zero-Knowledge-Passwort-Manager in Rust. Verbindet sich mit deinem nrzPass-Server und ist mit Vaultwarden/Bitwarden kompatibel.",
     "copyright": "nrz",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.png"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.png"
+    ],
     "macOS": {
       "minimumSystemVersion": "11.0"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJEQzc0OTBBQjU1RjQzNkEKUldScVExKzFDa25IdlNtZEwxTmp4T3FvTERiNUVmdVZIZmNvbVFPVTZJRW5ETHBteXNJYWVhMkQK",
+      "endpoints": [
+        "http://100.78.107.162:8390/nicorenezweers/nrzPass/raw/branch/umbrel/latest.json"
+      ],
+      "dangerousInsecureTransportProtocol": true
     }
   }
 }

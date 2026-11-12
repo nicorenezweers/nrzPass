@@ -319,6 +319,13 @@ pub async fn send_to_background(msg: &serde_json::Value) -> Result<JsValue, Stri
 }
 
 /// Vollansicht der Erweiterung in einem Tab oeffnen.
+/// Erweiterung neu laden (nach dem Ersetzen der Dateien durch ein Update).
+pub fn reload_extension() {
+    if let Some(rt) = ext_api().and_then(|a| get(&a, "runtime")) {
+        let _ = call(&rt, "reload", &[]);
+    }
+}
+
 pub fn open_extension_tab() {
     let Some(api) = ext_api() else { return };
     let (Some(rt), Some(tabs)) = (get(&api, "runtime"), get(&api, "tabs")) else { return };

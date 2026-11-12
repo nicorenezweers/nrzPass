@@ -6,6 +6,7 @@ mod env;
 mod net;
 mod state;
 mod ui;
+mod updates;
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;

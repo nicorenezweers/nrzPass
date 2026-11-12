@@ -85,6 +85,8 @@ pub fn SettingsPage() -> impl IntoView {
                 </Row>
             </Group>
 
+            {crate::updates::supported().then(|| view! { <Updates /> })}
+
             <Group title="Kontosicherheit">
                 <TwoFactor />
                 <ChangePassword kdf_label=kdf_label />
@@ -584,5 +586,95 @@ pub fn DownloadsPage() -> impl IntoView {
                 <p class="text-xs text-muted-foreground">"Diese Seite im Browser öffnen und „Zum Home-Bildschirm“ wählen – nrzPass läuft dann wie eine App. Bitwarden-Apps können sich ebenfalls mit diesem Server verbinden (eigener Server: diese Adresse)."</p>
             </Card>
         </div>
+    }
+}
+
+/// Updates: macOS-App installiert direkt (signiert), die Erweiterung zeigt Download + Neu laden.
+#[component]
+fn Updates() -> impl IntoView {
+    use crate::updates;
+    let app = app();
+    let busy = RwSignal::new(false);
+    let checked = RwSignal::new(false);
+    let installing = RwSignal::new(false);
+    let mac = env::platform() == Platform::Tauri;
+    let check = move || {
+        busy.set(true);
+        spawn_local(async move {
+            let r = updates::check().await;
+            busy.set(false);
+            checked.set(true);
+            match r {
+                Ok(u) => {
+                    app.settings.update(|s| s.last_update_check = env::now_ms());
+                    app.save_settings();
+                    app.update.set(u.available.then_some(u));
+                }
+                Err(e) => app.error(e),
+            }
+        });
+    };
+    let install = move || {
+        installing.set(true);
+        spawn_local(async move {
+            if let Err(e) = updates::install_mac().await {
+                installing.set(false);
+                app.error(e);
+            }
+        });
+    };
+    view! {
+        <Group title="Updates">
+            <Row title=format!("nrzPass {}", updates::CURRENT)
+                text=if mac { "Prüft nrzGit auf neue Versionen. Updates sind signiert und werden vor der Installation geprüft." } else { "Prüft nrzGit auf eine neue Version der Erweiterung." }>
+                <Button variant=ButtonVariant::Outline disabled=busy on_click=Callback::new(move |_| check())>
+                    <Show when=move || busy.get() fallback=|| view! { <Icon name="refresh" /> }><Spinner /></Show>"Nach Updates suchen"
+                </Button>
+            </Row>
+            {move || match app.update.get() {
+                Some(u) => {
+                    let notes = u.notes.clone();
+                    view! {
+                        <div class="grid gap-3 px-5 py-4">
+                            <p class="flex items-center gap-2 text-sm font-medium"><Badge variant=BadgeVariant::Success>"Neu"</Badge>{format!("Version {} ist verfügbar", u.version)}</p>
+                            {(!notes.is_empty()).then(|| view! { <p class="whitespace-pre-wrap text-xs text-muted-foreground">{notes}</p> })}
+                            {if mac {
+                                view! {
+                                    <Button class="w-full md:w-fit" disabled=installing on_click=Callback::new(move |_| install())>
+                                        <Show when=move || installing.get() fallback=|| view! { <Icon name="download" /> }><Spinner /></Show>
+                                        {move || if installing.get() { "Wird installiert – nrzPass startet gleich neu …" } else { "Jetzt installieren" }}
+                                    </Button>
+                                }.into_any()
+                            } else {
+                                let dl = u.download.clone();
+                                view! {
+                                    <div class="grid gap-3">
+                                        <ol class="grid list-decimal gap-1 pl-5 text-xs text-muted-foreground">
+                                            <li>"ZIP herunterladen und entpacken."</li>
+                                            {if env::is_firefox() {
+                                                view! { <li>"In about:debugging die alte Version entfernen und die neue ZIP als temporäres Add-on laden."</li> }.into_any()
+                                            } else {
+                                                view! { <li>"Inhalt in den bisherigen Erweiterungsordner kopieren (alte Dateien ersetzen)."</li><li>"Auf „Erweiterung neu laden“ klicken – Einstellungen und Anmeldung bleiben erhalten."</li> }.into_any()
+                                            }}
+                                        </ol>
+                                        <div class="flex flex-wrap gap-2">
+                                            {dl.map(|d| view! { <Button on_click=Callback::new(move |_| env::open_url(&d))><Icon name="download" />"ZIP herunterladen"</Button> })}
+                                            {(!env::is_firefox()).then(|| view! {
+                                                <Button variant=ButtonVariant::Outline on_click=Callback::new(|_| env::reload_extension())><Icon name="refresh" />"Erweiterung neu laden"</Button>
+                                            })}
+                                        </div>
+                                    </div>
+                                }.into_any()
+                            }}
+                        </div>
+                    }.into_any()
+                }
+                None => view! {
+                    <Show when=move || checked.get()>
+                        <p class="flex items-center gap-2 px-5 py-3 text-xs text-muted-foreground"><Icon name="check" class="size-3.5 text-success" />"Du hast die neueste Version."</p>
+                    </Show>
+                }.into_any(),
+            }}
+        </Group>
     }
 }
