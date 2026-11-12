@@ -91,7 +91,7 @@ pub fn fill_entry(app: App, e: &Entry) {
     let Some((tab, url)) = app.tab.get_untracked() else { return };
     let matches = e.uris().iter().any(|(u, m)| nrzpass_core::url::matches(u, &url, *m));
     if !matches {
-        let host = nrzpass_core::url::host_of(&url);
+        let host = nrzpass_core::url::display_name(&url);
         let ok = env::window()
             .confirm_with_message(&format!("„{}“ ist nicht für {host} gespeichert. Trotzdem auf dieser Seite ausfüllen?", e.name()))
             .unwrap_or(false);
@@ -545,8 +545,7 @@ pub fn EntryEditor(key: Option<String>) -> impl IntoView {
         let mut c = Cipher { cipher_type: cipher_type::LOGIN, edit: true, ..Default::default() };
         // Erweiterung: Adresse des aktiven Tabs vorschlagen
         if let Some((_, url)) = app.tab.get_untracked().filter(|(_, u)| u.starts_with("http")) {
-            let host = nrzpass_core::url::host_of(&url);
-            c.name = Some(host.trim_start_matches("www.").to_string());
+            c.name = Some(nrzpass_core::url::display_name(&url));
             let origin = url.split('/').take(3).collect::<Vec<_>>().join("/");
             c.login = Some(api::CipherLogin { uris: Some(vec![api::LoginUri { uri: Some(origin), ..Default::default() }]), ..Default::default() });
         }
@@ -722,8 +721,8 @@ pub fn EntryEditor(key: Option<String>) -> impl IntoView {
 
     view! {
         <div class="mx-auto grid w-full max-w-2xl gap-5 p-4 md:p-6">
-            <div class="flex items-center justify-between gap-2">
-                <h2 class="text-lg font-semibold">{if is_new { "Neuer Eintrag" } else { "Eintrag bearbeiten" }}</h2>
+            <div class="sticky top-0 z-10 -mx-4 -mt-4 flex items-center justify-between gap-2 border-b border-border bg-background/95 px-4 py-2.5 backdrop-blur md:static md:m-0 md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
+                <h2 class="truncate text-base font-semibold md:text-lg">{if is_new { "Neuer Eintrag" } else { "Eintrag bearbeiten" }}</h2>
                 <div class="flex gap-2">
                     <Button variant=ButtonVariant::Ghost on_click=Callback::new(move |_| app.editing.set(None))>"Abbrechen"</Button>
                     <Button disabled=busy on_click=Callback::new(move |_| save())>

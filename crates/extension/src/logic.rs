@@ -61,7 +61,7 @@ pub fn decide(index: &[IndexItem], page: &str, username: &str, password: &str, n
     if password.is_empty() || origin_of(page).is_empty() {
         return Decision::None;
     }
-    let base = url::base_domain(&url::host_of(page));
+    let base = url::site_key(page);
     if never.iter().any(|n| *n == base) {
         return Decision::None;
     }
@@ -90,8 +90,7 @@ pub fn decide(index: &[IndexItem], page: &str, username: &str, password: &str, n
 
 /// Anzeigename fuer einen neuen Eintrag: Host ohne `www.`.
 pub fn entry_name(page: &str) -> String {
-    let h = url::host_of(page);
-    h.strip_prefix("www.").unwrap_or(&h).to_string()
+    url::display_name(page)
 }
 
 #[cfg(test)]
@@ -137,5 +136,17 @@ mod tests {
         assert_eq!(origin_of("https://User@Example.com:8443/a?b"), "https://example.com:8443");
         assert_eq!(origin_of("javascript:alert(1)"), "");
         assert_eq!(entry_name("https://www.digitec.ch/login"), "digitec.ch");
+    }
+
+    #[test]
+    fn port_aware_on_ip_addresses() {
+        let idx = vec![item("nrz:a", "nico", "pw-git", "http://192.168.1.10:8390"), item("nrz:b", "nico", "pw-pass", "http://192.168.1.10:8490")];
+        let m = matching(&idx, "http://192.168.1.10:8490/login");
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].key, "nrz:b");
+        assert!(matching(&idx, "http://192.168.1.10:9000/").is_empty());
+        // Neuer Dienst auf anderem Port: Speichern anbieten statt "aktualisieren"
+        assert!(matches!(decide(&idx, "http://192.168.1.10:9000/", "nico", "neu", &[]), Decision::New));
+        assert_eq!(entry_name("http://192.168.1.10:9000/x"), "192.168.1.10:9000");
     }
 }

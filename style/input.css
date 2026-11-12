@@ -106,5 +106,12 @@ body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
 .pw-digit { color: oklch(0.75 0.12 240); }
 .pw-symbol { color: oklch(0.78 0.13 50); }
 
-/* Erweiterungs-Popup */
-body.popup { width: 380px; height: 580px; overflow: hidden; }
+/* Erweiterungs-Popup: feste Groesse (Chrome erlaubt max. 800x600), Inhalt scrollt innen */
+body.popup { width: 400px; height: 600px; overflow: hidden; }
+body.popup .pb-nav { padding-bottom: 0; }
+/* Im Popup gelten die kompakten Desktop-Groessen (die md:-Klassen greifen bei 400px nicht) */
+body.popup [data-name="Input"], body.popup [data-name="Select"], body.popup #vault-search { height: 2.25rem; font-size: 0.875rem; }
+body.popup [data-name="Textarea"] { font-size: 0.875rem; }
+body.popup button.size-10 { width: 2.25rem; height: 2.25rem; }
+body.popup ::-webkit-scrollbar { width: 6px; }
+body.popup ::-webkit-scrollbar-thumb { border-width: 1px; }

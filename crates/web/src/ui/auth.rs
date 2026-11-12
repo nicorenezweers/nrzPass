@@ -9,6 +9,25 @@ use leptos::task::spawn_local;
 
 #[component]
 fn AuthFrame(children: Children) -> impl IntoView {
+    if crate::env::is_popup() {
+        // Popup: kompakt, scrollt innen (feste Popup-Hoehe)
+        return view! {
+            <div class="relative h-[600px] w-[400px] overflow-y-auto">
+                <div class="drift pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true"><span class="drift-a"></span></div>
+                <div class="relative z-10 flex min-h-full flex-col justify-center gap-4 p-4">
+                    <div class="flex items-center gap-3">
+                        <Logo class="size-9" />
+                        <div class="min-w-0">
+                            <h1 class="text-base font-semibold leading-tight">"nrzPass"</h1>
+                            <p class="text-[11px] text-muted-foreground">"Zero-Knowledge · Vaultwarden-kompatibel"</p>
+                        </div>
+                    </div>
+                    {children()}
+                </div>
+            </div>
+        }
+        .into_any();
+    }
     view! {
         <div class="relative flex min-h-dvh items-center justify-center overflow-hidden p-4 safe-top safe-bottom">
             <div class="drift absolute inset-0 -z-0" aria-hidden="true"><span class="drift-a"></span><span class="drift-b"></span></div>
@@ -24,6 +43,7 @@ fn AuthFrame(children: Children) -> impl IntoView {
             </div>
         </div>
     }
+    .into_any()
 }
 
 #[component]

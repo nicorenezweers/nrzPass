@@ -105,7 +105,7 @@ pub async fn bg_message(msg: JsValue, sender: JsValue) -> Result<JsValue, JsValu
             json!({ "ok": true })
         }
         "never_pending" => {
-            let host = nrzpass_core::url::base_domain(&nrzpass_core::url::host_of(&frame_url));
+            let host = nrzpass_core::url::site_key(&frame_url);
             let mut list = never_list().await;
             if !host.is_empty() && !list.contains(&host) {
                 list.push(host);
@@ -166,7 +166,7 @@ fn hint_key(tab: i64) -> String {
 
 async fn remember(frame_url: &str, tab: Option<i64>, username: &str, password: &str) -> Value {
     let Some(tab) = tab else { return json!({ "action": "none" }) };
-    let base = nrzpass_core::url::base_domain(&nrzpass_core::url::host_of(frame_url));
+    let base = nrzpass_core::url::site_key(frame_url);
     // Mehrstufige Anmeldung: erst nur der Benutzername
     if password.is_empty() {
         if !username.trim().is_empty() {
@@ -216,7 +216,7 @@ async fn clear_pending(tab: Option<i64>) {
 
 async fn get_pending(frame_url: &str, tab: Option<i64>) -> Value {
     let Some(p) = load_pending(tab).await else { return json!({ "pending": null }) };
-    let base = |u: &str| nrzpass_core::url::base_domain(&nrzpass_core::url::host_of(u));
+    let base = |u: &str| nrzpass_core::url::site_key(u);
     if base(p["url"].as_str().unwrap_or("")) != base(frame_url) {
         return json!({ "pending": null });
     }
@@ -229,7 +229,7 @@ async fn get_pending(frame_url: &str, tab: Option<i64>) -> Value {
 
 async fn save_pending(frame_url: &str, tab: Option<i64>) -> Result<(), String> {
     let p = load_pending(tab).await.ok_or("Nichts zu speichern")?;
-    let base = |u: &str| nrzpass_core::url::base_domain(&nrzpass_core::url::host_of(u));
+    let base = |u: &str| nrzpass_core::url::site_key(u);
     if base(p["url"].as_str().unwrap_or("")) != base(frame_url) {
         return Err("Gehört nicht zu dieser Seite".into());
     }

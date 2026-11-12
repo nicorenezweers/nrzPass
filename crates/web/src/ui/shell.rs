@@ -225,11 +225,14 @@ fn VaultView() -> impl IntoView {
                 </Dialog>
             </section>
             <section class=move || format!("min-h-0 flex-1 flex-col overflow-y-auto {}", if detail_open.get() { "flex" } else { "hidden md:flex" })>
-                <div class="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-background/90 px-2 py-2 backdrop-blur md:hidden">
-                    <Button variant=ButtonVariant::Ghost size=ButtonSize::Sm on_click=Callback::new(move |_| { app.editing.set(None); app.selected.set(None) })>
-                        <Icon name="arrow-left" />"Zurück"
-                    </Button>
-                </div>
+                // Zurueck-Leiste (Handy/Popup); beim Bearbeiten gibt es "Abbrechen"
+                <Show when=move || app.editing.get().is_none()>
+                    <div class="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-background/90 px-2 py-1.5 backdrop-blur md:hidden">
+                        <Button variant=ButtonVariant::Ghost size=ButtonSize::Sm on_click=Callback::new(move |_| { app.editing.set(None); app.selected.set(None) })>
+                            <Icon name="arrow-left" />"Zurück"
+                        </Button>
+                    </div>
+                </Show>
                 <div class="pb-nav">
                     {move || match (app.editing.get(), app.selected.get()) {
                         (Some(k), _) => view! { <vault::EntryEditor key=k /> }.into_any(),
@@ -245,23 +248,24 @@ fn VaultView() -> impl IntoView {
 }
 
 #[component]
-fn BottomNav() -> impl IntoView {
+fn BottomNav(#[prop(optional)] inline: bool) -> impl IntoView {
     let app = app();
     let item = move |icon: &'static str, label: &'static str, v: View| {
         let v2 = v.clone();
         view! {
-            <button class=move || format!("flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] cursor-pointer {}",
+            <button class=move || format!("flex flex-1 flex-col items-center gap-0.5 text-[11px] cursor-pointer transition-colors hover:text-foreground {} {}",
+                    if inline { "py-1.5" } else { "py-2" },
                     if app.view.get() == v2 { "text-foreground" } else { "text-muted-foreground" })
                 on:click=move |_| {
                     if app.view.get_untracked() == View::Vault && v == View::Vault { app.selected.set(None); app.editing.set(None); }
                     app.view.set(v.clone());
                 }>
-                <Icon name=icon class="size-5" />{label}
+                <Icon name=icon class=if inline { "size-4" } else { "size-5" } />{label}
             </button>
         }
     };
     view! {
-        <nav class="fixed inset-x-0 bottom-0 z-40 flex border-t border-border bg-sidebar/95 backdrop-blur safe-bottom md:hidden">
+        <nav class=if inline { "flex shrink-0 border-t border-border bg-sidebar" } else { "fixed inset-x-0 bottom-0 z-40 flex border-t border-border bg-sidebar/95 backdrop-blur safe-bottom md:hidden" }>
             {item("vault", "Tresor", View::Vault)}
             {item("wand", "Generator", View::Generator)}
             {item("activity", "Bericht", View::Health)}
@@ -276,7 +280,7 @@ pub fn Shell() -> impl IntoView {
     let popup = env::is_popup();
     let session = app.session;
     view! {
-        <div class=if popup { "flex h-[580px] w-[380px] flex-col" } else { "flex h-dvh flex-col md:flex-row" }>
+        <div class=if popup { "flex h-[600px] w-[400px] flex-col overflow-hidden" } else { "flex h-dvh flex-col md:flex-row" }>
             // Seitenleiste (Desktop)
             {(!popup).then(|| view! {
                 <aside class="hidden w-60 shrink-0 flex-col border-r border-border bg-sidebar md:flex">
@@ -296,26 +300,39 @@ pub fn Shell() -> impl IntoView {
             })}
 
             // Kopfzeile (Handy / Popup)
-            <header class=if popup { "flex items-center gap-2 border-b border-border px-3 py-2" } else { "flex items-center gap-2 border-b border-border px-3 py-2 safe-top md:hidden" }>
-                <button class="rounded-md p-1.5 hover:bg-accent cursor-pointer" aria-label="Menü" on:click=move |_| app.nav_open.update(|o| *o = !*o)><Icon name="menu" class="size-5" /></button>
+            <header class=if popup { "flex shrink-0 items-center gap-1.5 border-b border-border bg-sidebar px-2 py-1.5" } else { "flex items-center gap-2 border-b border-border px-3 py-2 safe-top md:hidden" }>
+                <button class="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer" aria-label="Menü" title="Filter und Ordner" on:click=move |_| app.nav_open.update(|o| *o = !*o)><Icon name="menu" class="size-5" /></button>
                 <Logo class="size-6" />
-                <span class="flex-1 text-sm font-semibold">"nrzPass"</span>
-                {popup.then(|| view! {
-                    <Button variant=ButtonVariant::Ghost size=ButtonSize::Icon title="Im Tab öffnen" on_click=Callback::new(|_| env::open_extension_tab())><Icon name="external" /></Button>
-                })}
+                {if popup {
+                    view! {
+                        <div class="min-w-0 flex-1 leading-tight">
+                            <p class="text-sm font-semibold">"nrzPass"</p>
+                            <p class="truncate text-[11px] text-muted-foreground">{move || app.tab.get()
+                                .filter(|(_, u)| u.starts_with("http"))
+                                .map(|(_, u)| nrzpass_core::url::display_name(&u))
+                                .or_else(|| session.get().map(|s| s.email))
+                                .unwrap_or_default()}</p>
+                        </div>
+                    }.into_any()
+                } else {
+                    view! { <span class="flex-1 text-sm font-semibold">"nrzPass"</span> }.into_any()
+                }}
                 <Show when=move || app.update.get().is_some()>
                     <Button variant=ButtonVariant::Ghost size=ButtonSize::Icon class="relative text-success" title="Update verfügbar"
                         on_click=Callback::new(move |_| app.view.set(View::Settings))>
                         <Icon name="download" /><span class="absolute right-1 top-1 size-1.5 rounded-full bg-success"></span>
                     </Button>
                 </Show>
+                {popup.then(|| view! {
+                    <Button variant=ButtonVariant::Ghost size=ButtonSize::Icon title="Im Tab öffnen" on_click=Callback::new(|_| env::open_extension_tab())><Icon name="external" /></Button>
+                })}
                 <Button variant=ButtonVariant::Ghost size=ButtonSize::Icon title="Sperren" on_click=Callback::new(move |_| app.lock())><Icon name="lock" /></Button>
             </header>
 
             // Schublade (Handy / Popup)
             <Show when=move || app.nav_open.get()>
                 <div class=if popup { "fixed inset-0 z-50 bg-black/60 fade-in" } else { "fixed inset-0 z-50 bg-black/60 fade-in md:hidden" } on:click=move |_| app.nav_open.set(false)>
-                    <div class="h-full w-72 max-w-[85vw] border-r border-border bg-sidebar safe-top sheet-in" on:click=|ev| ev.stop_propagation()>
+                    <div class=if popup { "h-full w-64 border-r border-border bg-sidebar sheet-in" } else { "h-full w-72 max-w-[85vw] border-r border-border bg-sidebar safe-top sheet-in" } on:click=|ev| ev.stop_propagation()>
                         <div class="flex items-center gap-2.5 px-4 pt-4">
                             <Logo class="size-7" />
                             <p class="truncate text-sm text-muted-foreground">{move || session.get().map(|s| s.email).unwrap_or_default()}</p>
@@ -336,14 +353,15 @@ pub fn Shell() -> impl IntoView {
                 }}
             </main>
 
-            {(!popup).then(|| view! { <BottomNav /> })}
+            {if popup { view! { <BottomNav inline=true /> }.into_any() } else { view! { <BottomNav /> }.into_any() }}
         </div>
     }
 }
 
 #[component]
 fn Page(children: Children) -> impl IntoView {
-    view! { <div class="min-h-0 flex-1 overflow-y-auto pb-nav"><div class="mx-auto w-full max-w-3xl p-4 md:p-8">{children()}</div></div> }
+    let pad = if env::is_popup() { "mx-auto w-full p-3" } else { "mx-auto w-full max-w-3xl p-4 md:p-8" };
+    view! { <div class="min-h-0 flex-1 overflow-y-auto pb-nav"><div class=pad>{children()}</div></div> }
 }
 
 /// Meldungen unten rechts (Handy: ueber der Navigation).
@@ -351,7 +369,7 @@ fn Page(children: Children) -> impl IntoView {
 pub fn Toasts() -> impl IntoView {
     let app = app();
     view! {
-        <div class="pointer-events-none fixed inset-x-0 bottom-20 z-[60] flex flex-col items-center gap-2 px-4 md:inset-x-auto md:right-4 md:bottom-4 md:items-end">
+        <div class=if env::is_popup() { "pointer-events-none fixed inset-x-0 bottom-14 z-[60] flex flex-col items-center gap-2 px-3" } else { "pointer-events-none fixed inset-x-0 bottom-20 z-[60] flex flex-col items-center gap-2 px-4 md:inset-x-auto md:right-4 md:bottom-4 md:items-end" }>
             <For each=move || app.toasts.get() key=|t| t.id children=|t| view! {
                 <div class=format!("toast pointer-events-auto flex max-w-sm items-center gap-2 rounded-lg border px-3 py-2 text-sm shadow-lg {}",
                         if t.error { "border-destructive/40 bg-[#2a1515] text-red-200" } else { "border-border bg-popover" })>
