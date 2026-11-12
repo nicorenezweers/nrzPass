@@ -47,21 +47,28 @@ pub fn HealthPage() -> impl IntoView {
         let logins: Vec<Entry> = app.entries.with(|e| {
             e.iter().filter(|x| !x.deleted() && !x.broken && x.cipher.cipher_type == cipher_type::LOGIN).cloned().collect()
         });
-        let pw = |e: &Entry| e.cipher.login.as_ref().and_then(|l| l.password.clone()).filter(|p| !p.is_empty());
+        // Passwoerter nur kurz entschluesseln; fuer den Mehrfach-Vergleich bleibt nur ein Hash
         let mut weak = vec![];
-        let mut counts: HashMap<String, usize> = HashMap::new();
+        let mut hashes: Vec<Option<String>> = vec![];
         for e in &logins {
-            if let Some(p) = pw(e) {
-                *counts.entry(p.clone()).or_default() += 1;
+            let enc = e.cipher.login.as_ref().and_then(|l| l.password.clone()).filter(|p| !p.is_empty());
+            let p = enc.and_then(|enc| app.open(e, &enc)).filter(|p| !p.is_empty());
+            hashes.push(p.as_ref().map(|p| nrzpass_core::crypto::sha256_hex(p.as_bytes())));
+            if let Some(p) = p {
                 let s = nrzpass_core::strength::estimate(&p);
                 if s.score <= 1 {
                     weak.push((e.clone(), s.label.to_string()));
                 }
             }
         }
+        let mut counts: HashMap<&str, usize> = HashMap::new();
+        for h in hashes.iter().flatten() {
+            *counts.entry(h.as_str()).or_default() += 1;
+        }
         let reused: Vec<(Entry, String)> = logins
             .iter()
-            .filter_map(|e| pw(e).and_then(|p| counts.get(&p).copied()).filter(|n| *n > 1).map(|n| (e.clone(), format!("{n}× verwendet"))))
+            .zip(&hashes)
+            .filter_map(|(e, h)| h.as_deref().and_then(|h| counts.get(h).copied()).filter(|n| *n > 1).map(|n| (e.clone(), format!("{n}× verwendet"))))
             .collect();
         let insecure: Vec<(Entry, String)> = logins
             .iter()

@@ -8,12 +8,15 @@
 //! * Eintraege mit "Master-Passwort abfragen" werden nie automatisch ausgefuellt.
 //! * Schluessel und Index liegen nur in `storage.session` (Arbeitsspeicher) und werden bei
 //!   Inaktivitaet (Auto-Sperre) geloescht.
+//! * Passwoerter und TOTP-Schluessel stehen im Index nur verschluesselt (Sitzungsschluessel
+//!   `indexKey`) und werden erst beim Ausfuellen bzw. Vergleichen kurz entschluesselt.
 
 use crate::ext::{self, Area, INDEX, KEYS, LAST_USED, NEVER, SESSION};
 use crate::logic::{self, Decision, IndexItem};
 use nrzpass_core::api::{self, Cipher, CipherLogin, LoginUri, TokenResponse};
 use nrzpass_core::vault::{self, KeyRing};
 use nrzpass_core::SymmetricKey;
+use zeroize::{Zeroize, Zeroizing};
 use serde_json::{json, Value};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -58,6 +61,20 @@ async fn index() -> Option<Vec<IndexItem>> {
 async fn keys() -> Option<Value> {
     let s = ext::store_get(Area::Session, KEYS).await?;
     serde_json::from_str::<Value>(&s).ok().filter(|v| v["userKey"].is_string())
+}
+
+/// Sitzungsschluessel, mit dem Passwoerter/TOTP-Schluessel im Index verschluesselt sind.
+async fn index_key() -> Option<SymmetricKey> {
+    keys().await.and_then(|k| SymmetricKey::from_b64(k["indexKey"].as_str()?).ok())
+}
+
+fn open(key: &SymmetricKey, v: Option<&str>) -> Option<Zeroizing<String>> {
+    let enc = v.filter(|v| !v.is_empty())?.parse().ok()?;
+    key.decrypt_str(&enc).ok().map(Zeroizing::new)
+}
+
+fn seal(key: &SymmetricKey, v: Option<&str>) -> Option<String> {
+    v.filter(|v| !v.is_empty()).map(|v| key.encrypt_str(v).to_string())
 }
 
 async fn touch() {
@@ -146,14 +163,13 @@ async fn get_fill(frame_url: &str, key: &str) -> Value {
     if item.reprompt == 1 {
         return json!({ "error": "Dieser Eintrag verlangt das Master-Passwort – bitte über das nrzPass-Symbol ausfüllen" });
     }
+    let Some(ik) = index_key().await else { return json!({ "error": "nrzPass ist gesperrt" }) };
     touch().await;
-    let totp = item
-        .totp
-        .as_deref()
-        .filter(|t| !t.is_empty())
-        .and_then(nrzpass_core::totp::Totp::parse)
+    let password = open(&ik, item.password.as_deref());
+    let totp = open(&ik, item.totp.as_deref())
+        .and_then(|t| nrzpass_core::totp::Totp::parse(&t))
         .map(|t| t.code_at(now_secs()));
-    json!({ "username": item.username, "password": item.password, "totp": totp })
+    json!({ "username": item.username, "password": password.as_deref().map(|p| p.as_str()), "totp": totp })
 }
 
 fn pending_key(tab: i64) -> String {
@@ -183,8 +199,18 @@ async fn remember(frame_url: &str, tab: Option<i64>, username: &str, password: &
             }
         }
     }
-    let Some(idx) = index().await else { return json!({ "action": "none", "locked": true }) };
-    let decision = logic::decide(&idx, frame_url, &username, password, &never_list().await);
+    let (Some(idx), Some(ik)) = (index().await, index_key().await) else { return json!({ "action": "none", "locked": true }) };
+    // Nur die passenden Kandidaten kurz entschluesseln, vergleichen und wieder ueberschreiben
+    let mut cands: Vec<IndexItem> = logic::matching(&idx, frame_url).into_iter().cloned().collect();
+    for c in cands.iter_mut() {
+        c.password = open(&ik, c.password.as_deref()).map(|p| p.to_string());
+    }
+    let decision = logic::decide(&cands, frame_url, &username, password, &never_list().await);
+    for c in cands.iter_mut() {
+        if let Some(p) = c.password.as_mut() {
+            p.zeroize();
+        }
+    }
     let (action, key) = match &decision {
         Decision::None => return json!({ "action": "none" }),
         Decision::New => ("new", None),
@@ -192,7 +218,7 @@ async fn remember(frame_url: &str, tab: Option<i64>, username: &str, password: &
     };
     let pending = json!({
         "action": action, "key": key, "url": frame_url, "host": logic::entry_name(frame_url),
-        "username": username, "password": password, "ts": ext::now_ms(),
+        "username": username, "password": seal(&ik, Some(password)), "ts": ext::now_ms(),
     });
     ext::store_set(Area::Session, &pending_key(tab), &pending.to_string()).await;
     json!({ "action": action, "host": logic::entry_name(frame_url), "username": username })
@@ -235,18 +261,22 @@ async fn save_pending(frame_url: &str, tab: Option<i64>) -> Result<(), String> {
     }
     let k = keys().await.ok_or("nrzPass ist gesperrt – bitte über das Symbol entsperren")?;
     let user_key = SymmetricKey::from_b64(k["userKey"].as_str().unwrap_or("")).map_err(|_| "Schlüssel ungültig")?;
+    let ik = index_key().await.ok_or("nrzPass ist gesperrt – bitte über das Symbol entsperren")?;
     let ring = KeyRing::new(user_key);
     let url = p["url"].as_str().unwrap_or("").to_string();
     let username = p["username"].as_str().unwrap_or("").to_string();
-    let password = p["password"].as_str().unwrap_or("").to_string();
+    let password = open(&ik, p["password"].as_str()).ok_or("Nichts zu speichern")?;
+    let password: &str = password.as_str();
     let saved: Cipher = match p["action"].as_str() {
         Some("update") => {
             let key = p["key"].as_str().unwrap_or("");
             let id = key.strip_prefix("nrz:").ok_or("Nur Einträge im nrzPass-Tresor lassen sich ändern")?;
             let enc: Cipher = api::from_value_lenient(authed("GET", &format!("/api/ciphers/{id}"), None).await?).map_err(|e| e.to_string())?;
             let mut plain = vault::decrypt_cipher(&ring, &enc).map_err(|e| e.to_string())?;
-            vault::set_password(&mut plain, &password, &now_iso());
-            let req = vault::encrypt_cipher(&ring, &plain).map_err(|e| e.to_string())?;
+            vault::set_password(&mut plain, password, &now_iso());
+            let req = vault::encrypt_cipher(&ring, &plain).map_err(|e| e.to_string());
+            vault::wipe_secrets(&mut plain);
+            let req = req?;
             let body = serde_json::to_value(&req).map_err(|e| e.to_string())?;
             api::from_value_lenient(authed("PUT", &format!("/api/ciphers/{id}"), Some(body)).await?).map_err(|e| e.to_string())?
         }
@@ -256,30 +286,38 @@ async fn save_pending(frame_url: &str, tab: Option<i64>) -> Result<(), String> {
                 name: Some(logic::entry_name(&url)),
                 login: Some(CipherLogin {
                     username: Some(username).filter(|u| !u.is_empty()),
-                    password: Some(password),
+                    password: Some(password.to_string()),
                     uris: Some(vec![LoginUri { uri: Some(logic::origin_of(&url)), ..Default::default() }]),
                     ..Default::default()
                 }),
                 edit: true,
                 ..Default::default()
             };
-            let req = vault::encrypt_cipher(&ring, &plain).map_err(|e| e.to_string())?;
+            let mut plain = plain;
+            let req = vault::encrypt_cipher(&ring, &plain).map_err(|e| e.to_string());
+            vault::wipe_secrets(&mut plain);
+            let req = req?;
             let body = serde_json::to_value(&req).map_err(|e| e.to_string())?;
             api::from_value_lenient(authed("POST", "/api/ciphers", Some(body)).await?).map_err(|e| e.to_string())?
         }
     };
     // Index sofort aktualisieren, damit Ausfuellen ohne neues Synchronisieren klappt
-    let dec = vault::decrypt_cipher(&ring, &saved).map_err(|e| e.to_string())?;
+    let dec = vault::reveal(&ring, &vault::decrypt_listing(&ring, &saved).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let login = dec.login.clone().unwrap_or_default();
     let item = IndexItem {
         key: format!("nrz:{}", dec.id),
         name: dec.name.clone().unwrap_or_default(),
         username: login.username.clone(),
-        password: login.password.clone(),
-        totp: login.totp.clone(),
+        password: seal(&ik, login.password.as_deref()),
+        totp: seal(&ik, login.totp.as_deref()),
         uris: login.uris.clone().unwrap_or_default().into_iter().filter_map(|u| Some((u.uri?, u.match_type))).collect(),
         reprompt: dec.reprompt,
     };
+    let mut login = login;
+    for v in [&mut login.password, &mut login.totp].into_iter().flatten() {
+        v.zeroize();
+    }
+    drop(dec);
     let mut idx = index().await.unwrap_or_default();
     idx.retain(|i| i.key != item.key);
     idx.push(item);

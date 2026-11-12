@@ -7,6 +7,9 @@
 //!   verschluesselt.
 //! * Entschluesselte Schluessel und Eintraege existieren nur im Arbeitsspeicher und werden
 //!   beim Sperren verworfen (Schluessel werden dabei ueberschrieben).
+//! * Geheime Felder (Passwoerter, TOTP-Schluessel, Notizen, Kartennummern, ...) bleiben auch im
+//!   Arbeitsspeicher verschluesselt und werden nur fuer den Moment entschluesselt, in dem sie
+//!   angezeigt, kopiert oder ausgefuellt werden (danach ueberschrieben).
 //! * In der Erweiterung liegt der Benutzerschluessel waehrend der Sitzung in
 //!   chrome.storage.session (nur Arbeitsspeicher, nur fuer die Erweiterung lesbar).
 
@@ -16,7 +19,8 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use nrzpass_core::api::{self, Cipher, Folder, LinkedAccountData, TokenResponse};
 use nrzpass_core::crypto::{self, MasterKey};
-use nrzpass_core::vault::{self, KeyRing};
+use nrzpass_core::vault::{self, KeyRing, Revealed};
+use zeroize::Zeroizing;
 use nrzpass_core::{Kdf, SymmetricKey};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -127,11 +131,40 @@ pub struct Account {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
     pub account: String,
+    /// Sichtbare Felder entschluesselt, geheime Felder noch verschluesselt.
     pub cipher: Cipher,
     pub broken: bool,
+    /// Letzte vier Ziffern der Kartennummer (fuer die Liste).
+    pub last4: String,
 }
 
 impl Entry {
+    /// Eintrag fuer die Liste: nur sichtbare Felder entschluesseln.
+    pub fn load(account: &str, keys: &KeyRing, enc: &Cipher) -> Entry {
+        match vault::decrypt_listing(keys, enc) {
+            Ok(c) => {
+                let last4 = c
+                    .card
+                    .as_ref()
+                    .and_then(|k| k.number.as_deref())
+                    .filter(|n| !n.is_empty())
+                    .and_then(|n| vault::open_secret(keys, &c, n).ok())
+                    .map(|n| {
+                        let digits: Vec<char> = n.chars().filter(|c| c.is_ascii_digit()).collect();
+                        digits[digits.len().saturating_sub(4)..].iter().collect()
+                    })
+                    .unwrap_or_default();
+                Entry { account: account.to_string(), cipher: c, broken: false, last4 }
+            }
+            Err(_) => Entry {
+                account: account.to_string(),
+                cipher: Cipher { name: Some("(nicht entschlüsselbar)".into()), ..enc.clone() },
+                broken: true,
+                last4: String::new(),
+            },
+        }
+    }
+
     pub fn key(&self) -> String {
         format!("{}:{}", self.account, self.cipher.id)
     }
@@ -145,11 +178,7 @@ impl Entry {
             api::cipher_type::CARD => c
                 .card
                 .as_ref()
-                .map(|k| {
-                    let n = k.number.clone().unwrap_or_default();
-                    let last: String = n.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
-                    format!("{} •••• {}", k.brand.clone().unwrap_or_default(), last).trim().to_string()
-                })
+                .map(|k| format!("{} •••• {}", k.brand.clone().unwrap_or_default(), self.last4).trim().to_string())
                 .unwrap_or_default(),
             api::cipher_type::IDENTITY => c
                 .identity
@@ -293,6 +322,14 @@ impl App {
                 app.error("Kopieren nicht möglich");
             }
         });
+    }
+
+    /// Kopiert ein verschluesseltes Feld: wird erst jetzt entschluesselt.
+    pub fn copy_secret(&self, label: &str, e: &Entry, enc: &str) {
+        match self.open(e, enc) {
+            Some(p) => self.copy(label, p.to_string()),
+            None => self.error("Nicht entschlüsselbar"),
+        }
     }
 
     // -----------------------------------------------------------------------------------------
@@ -461,7 +498,10 @@ impl App {
         self.last_activity.set_value(env::now_ms());
         self.phase.set(Phase::Unlocked);
         if env::platform() == Platform::Extension {
-            env::store_set(Area::Session, EXT_KEYS, &json!({ "userKey": user_key.to_b64().as_str() }).to_string()).await;
+            // Sitzungsschluessel des Index behalten (sonst waeren gemerkte Logins unlesbar)
+            let index_key = self.extension_index_key().await;
+            let keys = json!({ "userKey": user_key.to_b64().as_str(), "indexKey": index_key.to_b64().as_str() });
+            env::store_set(Area::Session, EXT_KEYS, &keys.to_string()).await;
         }
         self.sync_all().await;
         crate::updates::auto_check(*self);
@@ -651,18 +691,7 @@ impl App {
                 }
             }
         }
-        let entries: Vec<Entry> = sync
-            .ciphers
-            .iter()
-            .map(|c| match vault::decrypt_cipher(&acc.keys, c) {
-                Ok(p) => Entry { account: id.to_string(), cipher: p, broken: false },
-                Err(_) => Entry {
-                    account: id.to_string(),
-                    cipher: Cipher { name: Some("(nicht entschlüsselbar)".into()), ..c.clone() },
-                    broken: true,
-                },
-            })
-            .collect();
+        let entries: Vec<Entry> = sync.ciphers.iter().map(|c| Entry::load(id, &acc.keys, c)).collect();
         let folders: Vec<FolderEntry> = sync
             .folders
             .iter()
@@ -694,17 +723,26 @@ impl App {
         if env::platform() != Platform::Extension {
             return;
         }
+        // Passwoerter und TOTP-Schluessel liegen im Index nur verschluesselt (Sitzungsschluessel,
+        // gilt bis zum Sperren); der Hintergrund-Dienst entschluesselt sie erst beim Ausfuellen.
+        let index_key = self.extension_index_key().await;
         let index: Vec<Value> = self.entries.with_untracked(|e| {
             e.iter()
                 .filter(|x| !x.deleted() && !x.broken && x.cipher.cipher_type == api::cipher_type::LOGIN)
                 .map(|x| {
                     let l = x.cipher.login.clone().unwrap_or_default();
+                    let seal = |v: Option<&str>| {
+                        v.filter(|v| !v.is_empty())
+                            .and_then(|v| self.open(x, v))
+                            .filter(|p| !p.is_empty())
+                            .map(|p| index_key.encrypt_str(&p).to_string())
+                    };
                     json!({
                         "key": x.key(),
                         "name": x.name(),
                         "username": l.username,
-                        "password": l.password,
-                        "totp": l.totp,
+                        "password": seal(l.password.as_deref()),
+                        "totp": seal(l.totp.as_deref()),
                         "uris": x.uris().into_iter().map(|(u, m)| json!([u, m])).collect::<Vec<_>>(),
                         "reprompt": x.cipher.reprompt,
                     })
@@ -715,6 +753,7 @@ impl App {
         if let (Some(s), Some(p)) = (self.session.get_untracked(), self.account(PRIMARY)) {
             let keys = json!({
                 "userKey": p.keys.user.to_b64().as_str(),
+                "indexKey": index_key.to_b64().as_str(),
                 "server": s.server,
                 "deviceId": s.device_id,
                 "tokens": p.tokens,
@@ -733,10 +772,43 @@ impl App {
         self.entries.with_untracked(|e| e.iter().find(|x| x.key() == key).cloned())
     }
 
+    /// Sitzungsschluessel fuer den Erweiterungs-Index (bleibt bis zum Sperren gleich).
+    async fn extension_index_key(&self) -> SymmetricKey {
+        env::store_get(Area::Session, EXT_KEYS)
+            .await
+            .and_then(|k| serde_json::from_str::<Value>(&k).ok())
+            .and_then(|v| v["indexKey"].as_str().and_then(|k| SymmetricKey::from_b64(k).ok()))
+            .unwrap_or_else(SymmetricKey::generate)
+    }
+
+    /// Entschluesselt ein einzelnes geheimes Feld eines Eintrags – nur fuer den Moment.
+    pub fn open(&self, e: &Entry, enc: &str) -> Option<Zeroizing<String>> {
+        if e.broken {
+            return None;
+        }
+        self.accounts.with_untracked(|a| {
+            let acc = a.iter().find(|x| x.id == e.account)?;
+            vault::open_secret(&acc.keys, &e.cipher, enc).ok()
+        })
+    }
+
+    /// Entschluesselt alle geheimen Felder eines Eintrags (wird beim Verwerfen ueberschrieben).
+    pub fn reveal(&self, e: &Entry) -> Option<Revealed> {
+        if e.broken {
+            return None;
+        }
+        self.accounts.with_untracked(|a| {
+            let acc = a.iter().find(|x| x.id == e.account)?;
+            vault::reveal(&acc.keys, &e.cipher).ok()
+        })
+    }
+
     /// Speichert einen Klartext-Eintrag (neu, wenn `cipher.id` leer ist).
-    pub async fn save_entry(&self, account: &str, plain: Cipher) -> Result<String, String> {
+    pub async fn save_entry(&self, account: &str, mut plain: Cipher) -> Result<String, String> {
         let acc = self.account(account).ok_or("Konto nicht gefunden")?;
-        let req = vault::encrypt_cipher(&acc.keys, &plain).map_err(|e| e.to_string())?;
+        let req = vault::encrypt_cipher(&acc.keys, &plain).map_err(|e| e.to_string());
+        vault::wipe_secrets(&mut plain);
+        let req = req?;
         let body = serde_json::to_value(&req).map_err(|e| e.to_string())?;
         let v = if plain.id.is_empty() {
             if plain.organization_id.is_some() {
@@ -749,8 +821,10 @@ impl App {
             self.call(account, "PUT", &format!("/api/ciphers/{}", plain.id), Some(body)).await?
         };
         let saved: Cipher = api::from_value_lenient(v).map_err(|e| e.to_string())?;
-        let dec = vault::decrypt_cipher(&acc.keys, &saved).map_err(|e| e.to_string())?;
-        let entry = Entry { account: account.to_string(), cipher: dec, broken: false };
+        let entry = Entry::load(account, &acc.keys, &saved);
+        if entry.broken {
+            return Err("Gespeicherter Eintrag nicht entschlüsselbar".into());
+        }
         let key = entry.key();
         self.entries.update(|e| {
             e.retain(|x| x.key() != key);
@@ -797,7 +871,7 @@ impl App {
     /// Kopiert einen Eintrag (z. B. aus Vaultwarden) in den nrzPass-Tresor.
     pub async fn copy_to(&self, key: &str, target: &str) -> Result<String, String> {
         let e = self.entry(key).ok_or("Eintrag nicht gefunden")?;
-        let mut c = e.cipher.clone();
+        let mut c = self.reveal(&e).ok_or("Eintrag nicht entschlüsselbar")?.into_inner();
         c.id = String::new();
         c.organization_id = None;
         c.collection_ids = None;

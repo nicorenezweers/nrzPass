@@ -52,8 +52,8 @@ pub fn visible_entries(app: App) -> Vec<Entry> {
                 if q.is_empty() {
                     return true;
                 }
-                let c = &e.cipher;
-                let mut hay = format!("{} {} {}", e.name(), e.subtitle(), c.notes.clone().unwrap_or_default());
+                // Notizen bleiben verschluesselt und werden daher nicht durchsucht
+                let mut hay = format!("{} {}", e.name(), e.subtitle());
                 for (u, _) in e.uris() {
                     hay.push(' ');
                     hay.push_str(&u);
@@ -99,9 +99,16 @@ pub fn fill_entry(app: App, e: &Entry) {
             return;
         }
     }
-    let l = e.cipher.login.clone().unwrap_or_default();
+    // Erst jetzt entschluesseln; der Klartext wird nach dem Senden verworfen und ueberschrieben
+    let Some(plain) = app.reveal(e) else { return app.error("Eintrag nicht entschlüsselbar") };
+    let l = plain.login.clone().unwrap_or_default();
     let totp = l.totp.as_deref().and_then(current_totp).map(|t| t.0);
     let msg = json!({ "type": "fill", "username": l.username, "password": l.password, "totp": totp, "url": url });
+    let mut l = l;
+    for v in [&mut l.password, &mut l.totp].into_iter().flatten() {
+        zeroize::Zeroize::zeroize(v);
+    }
+    drop(plain);
     spawn_local(async move {
         match env::send_to_tab(tab, &msg).await {
             Ok(_) => {
@@ -172,10 +179,10 @@ pub fn EntryRow(entry: Entry) -> impl IntoView {
                     <Button variant=ButtonVariant::Ghost size=ButtonSize::Icon title="Benutzername kopieren"
                         on_click=Callback::new(move |_| app.copy("Benutzername", u.clone()))><Icon name="user" /></Button>
                 })}
-                {pass.filter(|p| !p.is_empty()).map(|p| view! {
+                {pass.filter(|p| !p.is_empty()).map(|p| { let e = e2.clone(); view! {
                     <Button variant=ButtonVariant::Ghost size=ButtonSize::Icon title="Passwort kopieren"
-                        on_click=Callback::new(move |_| app.copy("Passwort", p.clone()))><Icon name="key" /></Button>
-                })}
+                        on_click=Callback::new(move |_| app.copy_secret("Passwort", &e, &p))><Icon name="key" /></Button>
+                }})}
             </div>
         </div>
     }
@@ -209,39 +216,89 @@ pub fn EntryList() -> impl IntoView {
 // ---------------------------------------------------------------------------------------------
 
 #[component]
-fn CopyRow(#[prop(into)] label: String, value: String, #[prop(optional)] secret: bool, #[prop(optional)] mono: bool) -> impl IntoView {
+/// Zeile mit Kopieren-Knopf. Mit `sealed` ist `value` noch verschluesselt und wird erst beim
+/// Anzeigen (fuer 30 s) bzw. Kopieren entschluesselt.
+fn CopyRow(
+    #[prop(into)] label: String,
+    value: String,
+    #[prop(optional)] secret: bool,
+    #[prop(optional)] mono: bool,
+    #[prop(default = None)] sealed: Option<Entry>,
+) -> impl IntoView {
     let app = app();
+    let is_sealed = sealed.is_some();
+    let plain = RwSignal::new(if is_sealed { None } else { Some(value.clone()) });
     let shown = RwSignal::new(!secret);
-    let v = value.clone();
+    // Klartext ueberschreiben und verwerfen (nur bei verschluesselten Werten)
+    let wipe = move || {
+        if is_sealed {
+            plain.try_update(|p| {
+                if let Some(x) = p.as_mut() {
+                    zeroize::Zeroize::zeroize(x);
+                }
+                *p = None;
+            });
+        }
+    };
+    let (sealed2, enc) = (sealed.clone(), value.clone());
+    let toggle = move |_| {
+        if shown.get_untracked() {
+            shown.set(false);
+            wipe();
+            return;
+        }
+        if let Some(e) = &sealed2 {
+            match app.open(e, &enc) {
+                Some(p) => plain.set(Some(p.to_string())),
+                None => return app.error("Nicht entschlüsselbar"),
+            }
+            // Nach 30 s wieder verbergen und aus dem Speicher werfen
+            spawn_local(async move {
+                gloo_timers::future::TimeoutFuture::new(30_000).await;
+                if shown.try_get_untracked() == Some(true) {
+                    shown.set(false);
+                    wipe();
+                }
+            });
+        }
+        shown.set(true);
+    };
+    on_cleanup(wipe);
     let l = label.clone();
     view! {
         <div class="group flex items-center gap-2 px-4 py-2.5">
             <div class="min-w-0 flex-1">
                 <p class="text-[11px] text-muted-foreground">{label.clone()}</p>
                 <div class="text-sm break-all">
-                    {move || if shown.get() {
-                        if secret { view! { <ColoredPassword value=v.clone() /> }.into_any() }
-                        else { view! { <span class=if mono { "font-mono" } else { "" }>{v.clone()}</span> }.into_any() }
-                    } else { view! { <span class="font-mono tracking-widest text-muted-foreground">"••••••••••"</span> }.into_any() }}
+                    {move || match (shown.get(), plain.get()) {
+                        (true, Some(v)) => if secret { view! { <ColoredPassword value=v /> }.into_any() }
+                            else { view! { <span class=if mono { "font-mono" } else { "" }>{v}</span> }.into_any() },
+                        _ => view! { <span class="font-mono tracking-widest text-muted-foreground">"••••••••••"</span> }.into_any(),
+                    }}
                 </div>
             </div>
             {secret.then(|| view! {
-                <Button variant=ButtonVariant::Ghost size=ButtonSize::Icon title="Anzeigen" on_click=Callback::new(move |_| shown.update(|s| *s = !*s))>
+                <Button variant=ButtonVariant::Ghost size=ButtonSize::Icon title="Anzeigen" on_click=Callback::new(toggle)>
                     {move || view! { <Icon name=if shown.get() { "eye-off" } else { "eye" } /> }}
                 </Button>
             })}
             <Button variant=ButtonVariant::Ghost size=ButtonSize::Icon title=format!("{l} kopieren")
-                on_click=Callback::new(move |_| app.copy(&l, value.clone()))><Icon name="copy" /></Button>
+                on_click=Callback::new(move |_| match &sealed {
+                    Some(e) => app.copy_secret(&l, e, &value),
+                    None => app.copy(&l, value.clone()),
+                })><Icon name="copy" /></Button>
         </div>
     }
 }
 
 #[component]
-fn TotpRow(secret: String) -> impl IntoView {
+/// `secret` ist der verschluesselte TOTP-Schluessel; er wird nur fuer jede Code-Berechnung kurz
+/// entschluesselt und sofort wieder ueberschrieben.
+fn TotpRow(entry: Entry, secret: String) -> impl IntoView {
     let app = app();
-    let state = RwSignal::new(current_totp(&secret));
-    let s2 = secret.clone();
-    if let Ok(h) = set_interval_with_handle(move || state.set(current_totp(&s2)), Duration::from_millis(1000)) {
+    let code = move || app.open(&entry, &secret).and_then(|k| current_totp(&k));
+    let state = RwSignal::new(code());
+    if let Ok(h) = set_interval_with_handle(move || state.set(code()), Duration::from_millis(1000)) {
         on_cleanup(move || h.clear());
     }
     view! {
@@ -283,9 +340,15 @@ fn Section(#[prop(into)] title: String, children: Children) -> impl IntoView {
     }
 }
 
-fn opt_rows(rows: Vec<(&'static str, Option<String>, bool)>) -> impl IntoView {
+/// Zeilen; geheime Werte (`true`) sind noch verschluesselt und werden erst bei Bedarf geoeffnet.
+fn opt_rows(e: &Entry, rows: Vec<(&'static str, Option<String>, bool)>) -> impl IntoView {
     rows.into_iter()
-        .filter_map(|(l, v, s)| v.filter(|v| !v.is_empty()).map(|v| view! { <CopyRow label=l value=v secret=s /> }))
+        .filter_map(|(l, v, s)| {
+            v.filter(|v| !v.is_empty()).map(|v| {
+                let sealed = s.then(|| e.clone());
+                view! { <CopyRow label=l value=v secret=s sealed=sealed /> }
+            })
+        })
         .collect_view()
 }
 
@@ -321,7 +384,8 @@ pub fn EntryDetail(key: String) -> impl IntoView {
                     "In nrzPass übernommen".to_string()
                 }),
                 "favorite" => {
-                    let mut c = e.cipher.clone();
+                    let Some(plain) = app.reveal(&e) else { return app.error("Eintrag nicht entschlüsselbar") };
+                    let mut c = plain.into_inner();
                     c.favorite = !c.favorite;
                     app.save_entry(&e.account, c).await.map(|_| String::new())
                 }
@@ -345,6 +409,8 @@ pub fn EntryDetail(key: String) -> impl IntoView {
             let acc_label = app.accounts.with_untracked(|a| a.iter().find(|x| x.id == e.account).map(|x| x.label.clone())).unwrap_or_default();
             let folder = c.folder_id.as_ref().and_then(|f| app.folders.with_untracked(|fs| fs.iter().find(|x| &x.folder.id == f && x.account == e.account).map(|x| x.folder.name.clone())));
             let uris = e.uris();
+            // Je eine Kopie fuer die einzelnen Abschnitte (die Ansicht nimmt sie in Closures mit)
+            let (e_login, e_fill, e_card, e_ident, e_notes, e_fields, e_hist) = (e.clone(), e.clone(), e.clone(), e.clone(), e.clone(), e.clone(), e.clone());
             view! {
                 <div class="mx-auto grid w-full max-w-2xl gap-5 p-4 md:p-6">
                     <div class="flex items-start gap-3">
@@ -389,8 +455,8 @@ pub fn EntryDetail(key: String) -> impl IntoView {
                         let launch = uris.iter().find_map(|(u, _)| nrzpass_core::url::launch_url(u));
                         view! {
                             <Section title="Anmeldedaten">
-                                {opt_rows(vec![("Benutzername", login.username.clone(), false), ("Passwort", login.password.clone(), true)])}
-                                {login.totp.clone().filter(|t| !t.is_empty()).map(|t| view! { <TotpRow secret=t /> })}
+                                {opt_rows(&e_login, vec![("Benutzername", login.username.clone(), false), ("Passwort", login.password.clone(), true)])}
+                                {login.totp.clone().filter(|t| !t.is_empty()).map(|t| { let e = e_login.clone(); view! { <TotpRow entry=e secret=t /> } })}
                             </Section>
                             {(!uris.is_empty()).then(|| view! {
                                 <Section title="Webseiten">
@@ -407,7 +473,7 @@ pub fn EntryDetail(key: String) -> impl IntoView {
                                     }).collect_view()}
                                 </Section>
                             })}
-                            {(env::is_popup() && !deleted).then(|| { let e = e.clone(); view! {
+                            {(env::is_popup() && !deleted).then(|| { let e = e_fill.clone(); view! {
                                 <Button class="w-full" on_click=Callback::new(move |_| fill_entry(app, &e))><Icon name="fill" />"Auf dieser Seite ausfüllen"</Button>
                             }})}
                             {(!env::is_popup()).then(|| launch.map(|l| view! {
@@ -418,7 +484,7 @@ pub fn EntryDetail(key: String) -> impl IntoView {
 
                     {c.card.clone().map(|k| view! {
                         <Section title="Karte">
-                            {opt_rows(vec![
+                            {opt_rows(&e_card, vec![
                                 ("Karteninhaber", k.cardholder_name, false), ("Marke", k.brand, false), ("Nummer", k.number, true),
                                 ("Ablauf", Some(format!("{}/{}", k.exp_month.unwrap_or_default(), k.exp_year.unwrap_or_default())).filter(|s| s != "/"), false),
                                 ("Prüfnummer", k.code, true),
@@ -428,7 +494,7 @@ pub fn EntryDetail(key: String) -> impl IntoView {
 
                     {c.identity.clone().map(|i| view! {
                         <Section title="Identität">
-                            {opt_rows(vec![
+                            {opt_rows(&e_ident, vec![
                                 ("Anrede", i.title, false), ("Vorname", i.first_name, false), ("Nachname", i.last_name, false),
                                 ("Benutzername", i.username, false), ("Firma", i.company, false), ("E-Mail", i.email, false), ("Telefon", i.phone, false),
                                 ("Adresse", Some([i.address1, i.address2, i.address3].into_iter().flatten().collect::<Vec<_>>().join(", ")), false),
@@ -439,13 +505,15 @@ pub fn EntryDetail(key: String) -> impl IntoView {
                         </Section>
                     })}
 
-                    {c.notes.clone().filter(|n| !n.is_empty()).map(|n| {
+                    {c.notes.clone().filter(|n| !n.is_empty()).and_then(|n| app.open(&e_notes, &n)).map(|n| {
+                        // Notizen werden nur entschluesselt, solange der Eintrag offen ist
                         let n2 = n.clone();
+                        let n = n.to_string();
                         view! {
                             <Section title="Notizen">
                                 <div class="flex gap-2 px-4 py-3">
                                     <p class="flex-1 whitespace-pre-wrap break-words text-sm">{n}</p>
-                                    <Button variant=ButtonVariant::Ghost size=ButtonSize::Icon title="Notiz kopieren" on_click=Callback::new(move |_| app.copy("Notiz", n2.clone()))><Icon name="copy" /></Button>
+                                    <Button variant=ButtonVariant::Ghost size=ButtonSize::Icon title="Notiz kopieren" on_click=Callback::new(move |_| app.copy("Notiz", n2.to_string()))><Icon name="copy" /></Button>
                                 </div>
                             </Section>
                         }
@@ -457,7 +525,10 @@ pub fn EntryDetail(key: String) -> impl IntoView {
                                 let name = f.name.unwrap_or_default();
                                 match f.field_type {
                                     2 => view! { <div class="flex items-center justify-between px-4 py-2.5 text-sm"><span>{name}</span><span>{if f.value.as_deref() == Some("true") { "Ja" } else { "Nein" }}</span></div> }.into_any(),
-                                    t => view! { <CopyRow label=name value=f.value.unwrap_or_default() secret={t == 1} /> }.into_any(),
+                                    t => {
+                                        let sealed = (t == nrzpass_core::vault::FIELD_HIDDEN).then(|| e_fields.clone());
+                                        view! { <CopyRow label=name value=f.value.unwrap_or_default() secret={t == 1} sealed=sealed /> }.into_any()
+                                    }
                                 }
                             }).collect_view()}
                         </Section>
@@ -465,7 +536,7 @@ pub fn EntryDetail(key: String) -> impl IntoView {
 
                     {c.password_history.clone().filter(|h| !h.is_empty()).map(|h| view! {
                         <Section title="Frühere Passwörter">
-                            {h.into_iter().map(|p| view! { <CopyRow label=format!("bis {}", env::format_date(&p.last_used_date)) value=p.password secret=true /> }).collect_view()}
+                            {h.into_iter().map(|p| view! { <CopyRow label=format!("bis {}", env::format_date(&p.last_used_date)) value=p.password secret=true sealed=Some(e_hist.clone()) /> }).collect_view()}
                         </Section>
                     })}
 
@@ -541,7 +612,8 @@ pub fn EntryEditor(key: Option<String>) -> impl IntoView {
     let app = app();
     let existing = key.as_ref().and_then(|k| app.entry(k));
     let is_new = existing.is_none();
-    let base: Cipher = existing.as_ref().map(|e| e.cipher.clone()).unwrap_or_else(|| {
+    // Zum Bearbeiten wird der Eintrag vollstaendig entschluesselt (nur solange der Editor offen ist)
+    let base: Cipher = existing.as_ref().and_then(|e| app.reveal(e)).map(|r| r.into_inner()).unwrap_or_else(|| {
         let mut c = Cipher { cipher_type: cipher_type::LOGIN, edit: true, ..Default::default() };
         // Erweiterung: Adresse des aktiven Tabs vorschlagen
         if let Some((_, url)) = app.tab.get_untracked().filter(|(_, u)| u.starts_with("http")) {

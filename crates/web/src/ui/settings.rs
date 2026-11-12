@@ -421,9 +421,11 @@ fn ImportExport() -> impl IntoView {
         let src = source.get_untracked();
         spawn_local(async move {
             gloo_timers::future::TimeoutFuture::new(30).await;
-            let items: Vec<_> = app.entries.with_untracked(|e| e.iter().filter(|x| x.account == src && !x.broken).map(|x| x.cipher.clone()).collect());
+            let entries: Vec<_> = app.entries.with_untracked(|e| e.iter().filter(|x| x.account == src && !x.broken).cloned().collect());
+            let mut items: Vec<_> = entries.iter().filter_map(|x| app.reveal(x)).map(|r| r.into_inner()).collect();
             let folders: Vec<_> = app.folders.with_untracked(|f| f.iter().filter(|x| x.account == src).map(|x| x.folder.clone()).collect());
             let json = nrzpass_core::vault::export_json(&items, &folders);
+            items.iter_mut().for_each(nrzpass_core::vault::wipe_secrets);
             let date = env::now_iso().chars().take(10).collect::<String>();
             let (name, content) = if protected {
                 match nrzpass_core::vault::export_protected(&json, &epw, Kdf::DEFAULT) {

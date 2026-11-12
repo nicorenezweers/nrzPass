@@ -3764,7 +3764,7 @@ dependencies = [
 
 [[package]]
 name = "nrzpass-core"
-version = "1.0.3"
+version = "1.0.5"
 dependencies = [
  "aes",
  "argon2",
@@ -3788,7 +3788,7 @@ dependencies = [
 
 [[package]]
 name = "nrzpass-desktop"
-version = "1.0.3"
+version = "1.0.5"
 dependencies = [
  "reqwest 0.12.28",
  "serde",
@@ -3804,7 +3804,7 @@ dependencies = [
 
 [[package]]
 name = "nrzpass-extension"
-version = "1.0.3"
+version = "1.0.5"
 dependencies = [
  "js-sys",
  "nrzpass-core",
@@ -3813,11 +3813,12 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "zeroize",
 ]
 
 [[package]]
 name = "nrzpass-server"
-version = "1.0.3"
+version = "1.0.5"
 dependencies = [
  "argon2",
  "axum",
@@ -3846,7 +3847,7 @@ dependencies = [
 
 [[package]]
 name = "nrzpass-web"
-version = "1.0.3"
+version = "1.0.5"
 dependencies = [
  "console_error_panic_hook",
  "gloo-timers",
