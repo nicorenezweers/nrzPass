@@ -107,7 +107,21 @@ pub async fn bg_message(msg: JsValue, sender: JsValue) -> Result<JsValue, JsValu
     let out = match msg["type"].as_str().unwrap_or("") {
         "status" => json!({ "locked": keys().await.is_none() }),
         "get_logins" => get_logins(&frame_url).await,
-        "get_fill" => get_fill(&frame_url, msg["key"].as_str().unwrap_or("")).await,
+        "get_fill" => {
+            let key = msg["key"].as_str().unwrap_or("");
+            let r = get_fill(&frame_url, key).await;
+            if r["error"].is_null() {
+                remember_fill(tab_id, key).await;
+            }
+            r
+        }
+        "get_totps" => get_totps(&frame_url, tab_id).await,
+        "get_totp" => get_totp(&frame_url, msg["key"].as_str().unwrap_or("")).await,
+        // Inhaltsskript meldet ein Ausfuellen aus dem Popup (fuer den 2FA-Schritt danach)
+        "filled" => {
+            remember_fill(tab_id, msg["key"].as_str().unwrap_or("")).await;
+            json!({ "ok": true })
+        }
         "generate" => json!({ "password": nrzpass_core::generator::suggest() }),
         "remember_login" => {
             remember(&frame_url, tab_id, msg["username"].as_str().unwrap_or(""), msg["password"].as_str().unwrap_or("")).await
@@ -170,6 +184,57 @@ async fn get_fill(frame_url: &str, key: &str) -> Value {
         .and_then(|t| nrzpass_core::totp::Totp::parse(&t))
         .map(|t| t.code_at(now_secs()));
     json!({ "username": item.username, "password": password.as_deref().map(|p| p.as_str()), "totp": totp })
+}
+
+fn last_fill_key(tab: i64) -> String {
+    format!("nrzpass.lastfill.{tab}")
+}
+
+/// Zuletzt in diesem Tab ausgefuellter Eintrag: wird beim 2FA-Schritt zuerst vorgeschlagen.
+async fn remember_fill(tab: Option<i64>, key: &str) {
+    if let (Some(tab), false) = (tab, key.is_empty()) {
+        let v = json!({ "key": key, "ts": ext::now_ms() });
+        ext::store_set(Area::Session, &last_fill_key(tab), &v.to_string()).await;
+    }
+}
+
+async fn last_fill(tab: Option<i64>) -> Option<String> {
+    let v: Value = serde_json::from_str(&ext::store_get(Area::Session, &last_fill_key(tab?)).await?).ok()?;
+    (ext::now_ms() - v["ts"].as_f64().unwrap_or(0.0) < PENDING_TTL_MS).then(|| v["key"].as_str().map(String::from)).flatten()
+}
+
+/// Eintraege mit 2FA-Schluessel, die zur Seite passen (zuletzt ausgefuellter zuerst).
+async fn get_totps(frame_url: &str, tab: Option<i64>) -> Value {
+    let Some(idx) = index().await else { return json!({ "locked": true, "items": [] }) };
+    let last = last_fill(tab).await;
+    let mut items: Vec<&IndexItem> = logic::matching(&idx, frame_url)
+        .into_iter()
+        .filter(|i| i.totp.as_deref().map(|t| !t.is_empty()).unwrap_or(false))
+        .collect();
+    items.sort_by_key(|i| Some(&i.key) != last.as_ref());
+    let items: Vec<Value> = items
+        .iter()
+        .map(|i| json!({ "key": i.key, "name": i.name, "username": i.username.clone().unwrap_or_default(), "reprompt": i.reprompt == 1 }))
+        .collect();
+    json!({ "locked": false, "items": items, "last": last })
+}
+
+/// Aktueller Einmalcode eines Eintrags – erst beim Klick berechnet.
+async fn get_totp(frame_url: &str, key: &str) -> Value {
+    let (Some(idx), Some(ik)) = (index().await, index_key().await) else { return json!({ "error": "nrzPass ist gesperrt" }) };
+    let Some(item) = idx.iter().find(|i| i.key == key) else { return json!({ "error": "Eintrag nicht gefunden" }) };
+    if !item.matches(frame_url) {
+        return json!({ "error": "Dieser Eintrag gehört nicht zu dieser Seite" });
+    }
+    if item.reprompt == 1 {
+        return json!({ "error": "Dieser Eintrag verlangt das Master-Passwort – bitte über das nrzPass-Symbol ausfüllen" });
+    }
+    let Some(totp) = open(&ik, item.totp.as_deref()).and_then(|t| nrzpass_core::totp::Totp::parse(&t)) else {
+        return json!({ "error": "2FA-Schlüssel ungültig" });
+    };
+    touch().await;
+    let now = now_secs();
+    json!({ "totp": totp.code_at(now), "remaining": totp.remaining(now) })
 }
 
 fn pending_key(tab: i64) -> String {

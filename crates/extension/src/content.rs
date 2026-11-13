@@ -84,6 +84,7 @@ impl Group {
 enum Action {
     Fill(String),
     Generate(String),
+    Totp(String),
 }
 
 struct Ui {
@@ -147,6 +148,10 @@ pub fn start() {
     }
     ST.with(|s| s.borrow_mut().tracked = Some(js_sys::WeakSet::new()));
     scan();
+    // Feld hatte schon beim Laden den Fokus (z. B. 2FA-Seite mit autofocus)
+    if let Some(el) = doc().active_element().and_then(|a| a.dyn_into::<HtmlInputElement>().ok()) {
+        on_focus(el);
+    }
 
     // Neue Felder (Single-Page-Apps, Dialoge) – entprellt neu einlesen
     let cb = Closure::<dyn FnMut()>::new(schedule_scan);
@@ -290,6 +295,8 @@ fn info(el: &HtmlInputElement) -> FieldInfo {
         aria_label: attr(el, "aria-label"),
         label: label_text(el),
         visible: visible(el) && !el.disabled() && !el.read_only(),
+        max_length: el.max_length().max(0) as i64,
+        input_mode: attr(el, "inputmode"),
     }
 }
 
@@ -443,6 +450,7 @@ fn close_dropdown() {
 
 enum Row {
     Login { name: String, user: String },
+    Totp { name: String, user: String },
     Generate(String),
     Msg(String),
     Err(String),
@@ -464,6 +472,21 @@ fn render(anchor: &HtmlInputElement, rows: Vec<Row>) {
                 let t = el("div", "t", None);
                 t.append_child(&el("div", "n", Some(&name))).ok();
                 t.append_child(&el("div", "s", Some(&if user.is_empty() { "ohne Benutzername".to_string() } else { format!("Anmelden als {user}") }))).ok();
+                item.append_child(&t).ok();
+                dd.append_child(&item).ok();
+            }
+            Row::Totp { name, user } => {
+                let item = el("div", "item", None);
+                let _ = item.set_attribute("data-i", &i.to_string());
+                let _ = item.set_attribute("role", "option");
+                i += 1;
+                let av = el("div", "av", None);
+                // Schild mit Uhr: 2FA-Code
+                av.set_inner_html(r#"<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4l2 1.5"/></svg>"#);
+                item.append_child(&av).ok();
+                let t = el("div", "t", None);
+                t.append_child(&el("div", "n", Some(&name))).ok();
+                t.append_child(&el("div", "s", Some(&if user.is_empty() { "2FA-Code einfügen".to_string() } else { format!("2FA-Code einfügen · {user}") }))).ok();
                 item.append_child(&t).ok();
                 dd.append_child(&item).ok();
             }
@@ -538,14 +561,44 @@ fn on_focus(input: HtmlInputElement) {
         scan();
     }
     let Some((group, kind)) = group_of(&input) else { return };
-    if !matches!(kind, FieldKind::Username | FieldKind::CurrentPassword | FieldKind::NewPassword) {
+    if !matches!(kind, FieldKind::Username | FieldKind::CurrentPassword | FieldKind::NewPassword | FieldKind::Totp) {
         return;
     }
-    let _ = group;
+    // Einzelfelder: Vorschlag nur am ersten (leeren) Feld, nicht bei jeder Ziffer
+    if kind == FieldKind::Totp {
+        let boxes = group.of(FieldKind::Totp);
+        if boxes.len() > 1 && (boxes.first() != Some(&input) || !input.value().is_empty()) {
+            return;
+        }
+    }
     spawn(async move {
         let mut rows = Vec::new();
         let mut actions = Vec::new();
-        if kind == FieldKind::NewPassword {
+        let mut preselect = -1;
+        if kind == FieldKind::Totp {
+            let r = ext::send(json!({"type": "get_totps"})).await;
+            if r.is_null() {
+                return;
+            }
+            if r["locked"].as_bool().unwrap_or(true) {
+                rows.push(Row::Msg("nrzPass ist gesperrt – für den 2FA-Code auf das nrzPass-Symbol klicken.".into()));
+            } else {
+                for it in r["items"].as_array().into_iter().flatten() {
+                    if it["reprompt"].as_bool().unwrap_or(false) {
+                        continue;
+                    }
+                    rows.push(Row::Totp {
+                        name: it["name"].as_str().unwrap_or("").to_string(),
+                        user: it["username"].as_str().unwrap_or("").to_string(),
+                    });
+                    actions.push(Action::Totp(it["key"].as_str().unwrap_or("").to_string()));
+                }
+                // Gerade ausgefuellter Login oder nur ein Treffer: mit Enter direkt einfuegen
+                if !actions.is_empty() && (actions.len() == 1 || r["last"].is_string()) {
+                    preselect = 0;
+                }
+            }
+        } else if kind == FieldKind::NewPassword {
             let r = ext::send(json!({"type": "generate"})).await;
             if let Some(pw) = r["password"].as_str() {
                 rows.push(Row::Generate(pw.to_string()));
@@ -582,9 +635,10 @@ fn on_focus(input: HtmlInputElement) {
             let mut st = s.borrow_mut();
             st.target = Some(input.clone());
             st.actions = actions;
-            st.selected = -1;
+            st.selected = preselect;
         });
         render(&input, rows);
+        highlight();
     });
 }
 
@@ -650,6 +704,23 @@ fn activate(i: usize) {
             fill_fields(&fields, &pw);
             close_dropdown();
         }
+        Action::Totp(key) => {
+            spawn(async move {
+                let r = ext::send(json!({"type": "get_totp", "key": key})).await;
+                match r["totp"].as_str() {
+                    Some(code) => {
+                        ST.with(|s| s.borrow_mut().filling = true);
+                        fill_totp(&group, code);
+                        ST.with(|s| s.borrow_mut().filling = false);
+                        close_dropdown();
+                    }
+                    None => {
+                        render(&target, vec![Row::Err(r["error"].as_str().unwrap_or("2FA-Code nicht verfügbar").to_string())]);
+                        ST.with(|s| s.borrow_mut().actions.clear());
+                    }
+                }
+            });
+        }
         Action::Fill(key) => {
             spawn(async move {
                 let r = ext::send(json!({"type": "get_fill", "key": key})).await;
@@ -706,11 +777,24 @@ fn fill_group(g: &Group, username: Option<&str>, password: Option<&str>, totp: O
         }
     }
     if let Some(t) = totp.filter(|t| !t.is_empty()) {
-        for f in g.of(FieldKind::Totp) {
-            set_value(&f, t);
-        }
+        fill_totp(g, t);
     }
     ST.with(|s| s.borrow_mut().filling = false);
+}
+
+/// Einmalcode einfuegen; bei Einzelfeldern (je ein Zeichen) Ziffer fuer Ziffer.
+fn fill_totp(g: &Group, code: &str) {
+    let fields = g.of(FieldKind::Totp);
+    let digits: Vec<char> = code.chars().collect();
+    if fields.len() > 1 && fields.iter().all(|f| f.max_length() == 1) {
+        for (f, c) in fields.iter().zip(digits.iter()) {
+            set_value(f, &c.to_string());
+        }
+    } else {
+        for f in &fields {
+            set_value(f, code);
+        }
+    }
 }
 
 /// Nachricht aus dem Popup: `{"type":"fill", username, password, totp, url}`.
@@ -734,9 +818,16 @@ fn on_runtime_message(msg: JsValue, _sender: JsValue, respond: js_sys::Function)
             .or_else(|| st.groups.iter().find(|g| g.kind == FormKind::Login && !g.of(FieldKind::CurrentPassword).is_empty()).cloned())
             .or_else(|| st.groups.iter().find(|g| !g.of(FieldKind::CurrentPassword).is_empty()).cloned())
             .or_else(|| st.groups.iter().find(|g| !g.of(FieldKind::Username).is_empty()).cloned())
+            .or_else(|| st.groups.iter().find(|g| g.kind == FormKind::Totp).cloned())
     });
     let Some(g) = g else { return JsValue::FALSE };
     fill_group(&g, m["username"].as_str(), m["password"].as_str(), m["totp"].as_str());
+    // Fuer den 2FA-Schritt danach merken, welcher Eintrag ausgefuellt wurde
+    if let Some(key) = m["key"].as_str().map(String::from) {
+        spawn(async move {
+            ext::send(json!({"type": "filled", "key": key})).await;
+        });
+    }
     let _ = respond.call1(&JsValue::NULL, &ext::to_js(&json!({"filled": true})));
     JsValue::FALSE
 }

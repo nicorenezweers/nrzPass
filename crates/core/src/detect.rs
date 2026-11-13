@@ -15,6 +15,12 @@ pub struct FieldInfo {
     pub aria_label: String,
     pub label: String,
     pub visible: bool,
+    /// `maxlength` (0 = nicht gesetzt)
+    #[serde(default)]
+    pub max_length: i64,
+    /// `inputmode` (z. B. "numeric")
+    #[serde(default)]
+    pub input_mode: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,8 +57,12 @@ const NEW_WORDS: &[&str] = &[
 ];
 const TOTP_WORDS: &[&str] = &[
     "otp", "totp", "2fa", "mfa", "one-time", "onetime", "einmal", "authenticator", "verification code", "sicherheitscode",
-    "bestätigungscode", "bestaetigungscode", "security code", "auth code", "token",
+    "bestätigungscode", "bestaetigungscode", "security code", "auth code", "token", "two-factor", "two_factor",
+    "twofactor", "2-step", "2step", "two-step", "zwei-faktor", "zweifaktor", "verifizierungscode", "authentication code",
+    "authentifizierungscode", "login code", "anmeldecode", "app code", "tfa", "passcode", "sms code", "sms-code",
 ];
+/// "Code"-Felder, die keine Einmalcodes sind.
+const NOT_OTP_CODE: &[&str] = &["zip", "plz", "postal", "postleit", "promo", "voucher", "rabatt", "discount", "country", "area"];
 const SEARCH_WORDS: &[&str] = &["search", "suche", "query", "coupon", "gutschein", "captcha", "newsletter"];
 
 fn any(h: &str, words: &[&str]) -> bool {
@@ -85,6 +95,11 @@ pub fn classify(f: &FieldInfo) -> FieldKind {
     if any(&hay, TOTP_WORDS) && !any(&hay, USER_WORDS) {
         return FieldKind::Totp;
     }
+    // "Code" mit Zifferntastatur oder 6–8 Stellen (z. B. "Bestätigungs-Code", "Enter code")
+    let numeric = f.input_mode.eq_ignore_ascii_case("numeric") || matches!(t.as_str(), "tel" | "number");
+    if hay.contains("code") && !any(&hay, NOT_OTP_CODE) && !any(&hay, USER_WORDS) && (numeric || (6..=8).contains(&f.max_length)) {
+        return FieldKind::Totp;
+    }
     if ac.contains("username") || ac.contains("email") || t == "email" || any(&hay, USER_WORDS) {
         return FieldKind::Username;
     }
@@ -104,6 +119,21 @@ pub fn classify_form(fields: &[FieldInfo]) -> (FormKind, Vec<FieldKind>) {
         .collect();
 
     if pw_idx.is_empty() {
+        // Einmalcode in Einzelfeldern (4–8 Felder mit je einem Zeichen)
+        let single: Vec<usize> = fields
+            .iter()
+            .enumerate()
+            .filter(|(i, f)| {
+                f.visible && f.max_length == 1 && matches!(f.input_type.to_lowercase().as_str(), "text" | "tel" | "number" | "")
+                    && matches!(kinds[*i], FieldKind::Other | FieldKind::Totp)
+            })
+            .map(|(i, _)| i)
+            .collect();
+        if (4..=8).contains(&single.len()) {
+            for &i in &single {
+                kinds[i] = FieldKind::Totp;
+            }
+        }
         if kinds.contains(&FieldKind::Totp) {
             return (FormKind::Totp, kinds);
         }
@@ -180,5 +210,24 @@ mod tests {
         assert_eq!(classify(&f("text", "otp_code", "")), FieldKind::Totp);
         assert_eq!(classify(&f("text", "q", "one-time-code")), FieldKind::Totp);
         assert_eq!(classify(&f("text", "search_user", "")), FieldKind::Other);
+    }
+    #[test]
+    fn totp_variants() {
+        let mut code = f("text", "code", "");
+        assert_eq!(classify(&code), FieldKind::Other);
+        code.input_mode = "numeric".into();
+        assert_eq!(classify(&code), FieldKind::Totp);
+        let mut plz = f("text", "zip_code", "");
+        plz.input_mode = "numeric".into();
+        assert_eq!(classify(&plz), FieldKind::Other);
+        assert_eq!(classify(&f("text", "app_two_factor", "")), FieldKind::Totp);
+        let mut six = f("text", "verify_code", "");
+        six.max_length = 6;
+        assert_eq!(classify(&six), FieldKind::Totp);
+        // Sechs Einzelfelder
+        let boxes: Vec<FieldInfo> = (0..6).map(|i| { let mut b = f("text", &format!("d{i}"), ""); b.max_length = 1; b }).collect();
+        let (k, kinds) = classify_form(&boxes);
+        assert_eq!(k, FormKind::Totp);
+        assert!(kinds.iter().all(|k| *k == FieldKind::Totp));
     }
 }

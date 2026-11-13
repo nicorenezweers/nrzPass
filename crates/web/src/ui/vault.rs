@@ -103,7 +103,7 @@ pub fn fill_entry(app: App, e: &Entry) {
     let Some(plain) = app.reveal(e) else { return app.error("Eintrag nicht entschlüsselbar") };
     let l = plain.login.clone().unwrap_or_default();
     let totp = l.totp.as_deref().and_then(current_totp).map(|t| t.0);
-    let msg = json!({ "type": "fill", "username": l.username, "password": l.password, "totp": totp, "url": url });
+    let msg = json!({ "type": "fill", "key": e.key(), "username": l.username, "password": l.password, "totp": totp, "url": url });
     let mut l = l;
     for v in [&mut l.password, &mut l.totp].into_iter().flatten() {
         zeroize::Zeroize::zeroize(v);
