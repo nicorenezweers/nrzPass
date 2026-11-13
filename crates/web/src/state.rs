@@ -214,6 +214,7 @@ pub enum View {
     Accounts,
     Settings,
     Health,
+    Timeline,
     Downloads,
 }
 

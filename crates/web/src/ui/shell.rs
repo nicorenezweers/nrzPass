@@ -4,7 +4,7 @@ use crate::env::{self, Platform};
 use crate::state::{app, Filter, View, PRIMARY};
 use crate::ui::icons::{Icon, Logo};
 use crate::ui::kit::*;
-use crate::ui::{accounts, generator, health, settings, vault};
+use crate::ui::{accounts, generator, health, settings, timeline, vault};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use nrzpass_core::api::cipher_type;
@@ -109,6 +109,7 @@ fn Sidebar() -> impl IntoView {
             <NavHeading label="Werkzeuge" />
             <NavItem icon="wand" label="Generator" active=Signal::derive(move || app.view.get() == View::Generator) on_click=Callback::new(move |_| go(View::Generator)) />
             <NavItem icon="activity" label="Sicherheitsbericht" active=Signal::derive(move || app.view.get() == View::Health) on_click=Callback::new(move |_| go(View::Health)) />
+            <NavItem icon="clock" label="Zeitleiste" active=Signal::derive(move || app.view.get() == View::Timeline) on_click=Callback::new(move |_| go(View::Timeline)) />
             <NavItem icon="link" label="Konten & Vaultwarden" active=Signal::derive(move || app.view.get() == View::Accounts) on_click=Callback::new(move |_| go(View::Accounts)) />
             <NavItem icon="settings" label="Einstellungen" active=Signal::derive(move || app.view.get() == View::Settings) on_click=Callback::new(move |_| go(View::Settings)) />
             {(env::platform() == Platform::Web).then(|| view! {
@@ -349,6 +350,7 @@ pub fn Shell() -> impl IntoView {
                     View::Accounts => view! { <Page><accounts::AccountsPage /></Page> }.into_any(),
                     View::Settings => view! { <Page><settings::SettingsPage /></Page> }.into_any(),
                     View::Health => view! { <Page><health::HealthPage /></Page> }.into_any(),
+                    View::Timeline => view! { <Page><timeline::TimelinePage /></Page> }.into_any(),
                     View::Downloads => view! { <Page><settings::DownloadsPage /></Page> }.into_any(),
                 }}
             </main>
