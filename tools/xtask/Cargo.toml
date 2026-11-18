@@ -1,0 +1,10 @@
+[package]
+name = "xtask"
+description = "nrzPass Build-Werkzeug: Web-Tresor, Server, macOS-App, Browser-Erweiterung, Umbrel-Paket (cargo xtask)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json.workspace = true

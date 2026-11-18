@@ -1,8 +1,46 @@
-@import "tailwindcss";
+//! Web-Tresor: Tailwind-Eingabe und Trunk-Einstieg werden hier erzeugt, dann `trunk build`.
+
+use crate::util::{run, step, Result};
+use std::fs;
+use std::path::Path;
+use std::process::{Command, Stdio};
+
+const CSS_IN: &str = "target/xtask/tailwind.css";
+const CSS_OUT: &str = "crates/web/assets/app.css";
+const INDEX: &str = "crates/web/index.html";
+
+/// Trunk-Einstieg; Trunk ersetzt die data-trunk-Links durch die gehashten Dateien.
+const INDEX_HTML: &str = r##"<!doctype html>
+<html lang="de" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#141414">
+  <meta name="color-scheme" content="dark">
+  <meta name="referrer" content="no-referrer">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="nrzPass">
+  <title>nrzPass</title>
+  <link rel="icon" href="/assets/brand/icon-32.png" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png" sizes="180x180">
+  <link rel="manifest" href="/site.webmanifest">
+  <link data-trunk rel="copy-dir" href="assets/fonts" data-target-path="assets/fonts">
+  <link data-trunk rel="copy-dir" href="assets/brand" data-target-path="assets/brand">
+  <link data-trunk rel="copy-file" href="assets/site.webmanifest">
+  <link data-trunk rel="css" href="assets/app.css">
+  <link data-trunk rel="rust" data-wasm-opt="3" data-wasm-opt-params="--enable-bulk-memory --enable-bulk-memory-opt --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals --enable-reference-types --enable-multivalue" data-bin="nrzpass-web" data-cargo-profile="wasm-release" data-integrity="none" />
+</head>
+<body class="bg-background text-foreground font-sans antialiased"></body>
+</html>
+"##;
+
+/// Tailwind-Eingabe (nrzTheme). Pfade relativ zu target/xtask/.
+const TAILWIND: &str = r#"@import "tailwindcss";
 
 /* Klassen stehen in den Rust-Komponenten (Web-Tresor und Erweiterung) */
-@source "../crates/web/src";
-@source "../crates/extension/src";
+@source "../../crates/web/src";
+@source "../../crates/extension/src";
 
 @font-face {
   font-family: "Geist Mono";
@@ -106,8 +144,11 @@ body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
 .pw-digit { color: oklch(0.75 0.12 240); }
 .pw-symbol { color: oklch(0.78 0.13 50); }
 
-/* Erweiterungs-Popup: feste Groesse (Chrome erlaubt max. 800x600), Inhalt scrollt innen */
-body.popup { width: 400px; height: 600px; overflow: hidden; }
+/* Erweiterungs-Popup: Wunschgroesse 400x600 (Chrome erlaubt max. 800x600), Inhalt scrollt innen.
+   Ist das Fenster kleiner (Zoom, kleiner Bildschirm, Firefox-Ueberlaufmenue), setzt main.rs
+   --popup-w/--popup-h auf die echte Groesse, damit Kopf- und Navigationsleiste sichtbar bleiben. */
+html:has(body.popup) { overflow: hidden; }
+body.popup { width: var(--popup-w, 400px); height: var(--popup-h, 600px); min-width: 240px; overflow: hidden; }
 body.popup .pb-nav { padding-bottom: 0; }
 /* Im Popup gelten die kompakten Desktop-Groessen (die md:-Klassen greifen bei 400px nicht) */
 body.popup [data-name="Input"], body.popup [data-name="Select"], body.popup #vault-search { height: 2.25rem; font-size: 0.875rem; }
@@ -115,3 +156,41 @@ body.popup [data-name="Textarea"] { font-size: 0.875rem; }
 body.popup button.size-10 { width: 2.25rem; height: 2.25rem; }
 body.popup ::-webkit-scrollbar { width: 6px; }
 body.popup ::-webkit-scrollbar-thumb { border-width: 1px; }
+"#;
+
+fn tailwind() -> Result<Command> {
+    if !Path::new("node_modules/.bin/tailwindcss").exists() {
+        run(Command::new("npm").args(["install", "--silent"]))?;
+    }
+    fs::create_dir_all("target/xtask")?;
+    fs::write(CSS_IN, TAILWIND)?;
+    let mut cmd = Command::new("node_modules/.bin/tailwindcss");
+    cmd.args(["-i", CSS_IN, "-o", CSS_OUT]);
+    Ok(cmd)
+}
+
+/// Erzeugt die Trunk-Eingaben (index.html, app.css).
+fn prepare() -> Result<()> {
+    fs::write(INDEX, INDEX_HTML)?;
+    css()
+}
+
+pub fn css() -> Result<()> {
+    run(tailwind()?.arg("--minify"))
+}
+
+pub fn build() -> Result<()> {
+    step("Web-Tresor");
+    prepare()?;
+    run(Command::new("trunk").args(["build", "--release"]).current_dir("crates/web"))?;
+    println!("dist/web fertig");
+    Ok(())
+}
+
+pub fn serve() -> Result<()> {
+    prepare()?;
+    let mut watch = tailwind()?.arg("--watch").stdin(Stdio::null()).spawn()?;
+    let r = run(Command::new("trunk").arg("serve").current_dir("crates/web"));
+    let _ = watch.kill();
+    r
+}

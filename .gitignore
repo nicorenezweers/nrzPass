@@ -6,3 +6,6 @@
 *.dmg
 /tools/icongen/target
 /crates/desktop/gen
+# von cargo xtask erzeugt
+/crates/web/index.html
+/crates/web/assets/app.css

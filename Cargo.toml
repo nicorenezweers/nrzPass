@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/server", "crates/web", "crates/desktop", "crates/extension"]
+members = ["crates/core", "crates/server", "crates/web", "crates/desktop", "crates/extension", "tools/xtask"]
 default-members = ["crates/core", "crates/server"]
 
 [workspace.package]
-version = "1.0.7"
+version = "1.0.8"
 edition = "2021"
 license = "MIT"
 publish = false

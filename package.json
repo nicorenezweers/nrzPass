@@ -1,10 +1,6 @@
 {
   "name": "nrzpass",
   "private": true,
-  "scripts": {
-    "css": "tailwindcss -i ./style/input.css -o ./crates/web/assets/app.css --minify",
-    "css:watch": "tailwindcss -i ./style/input.css -o ./crates/web/assets/app.css --watch"
-  },
   "devDependencies": {
     "@tailwindcss/cli": "4.1.17",
     "tailwindcss": "4.1.17"

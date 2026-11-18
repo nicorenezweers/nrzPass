@@ -59,12 +59,13 @@ Voraussetzungen: Rust (mit `wasm32-unknown-unknown`), `trunk`, `cargo-tauri`, No
 Tailwind), für Linux-Server `cargo-zigbuild` + `zig`.
 
 ```sh
-scripts/build-web.sh          # dist/web (Web-Tresor)
+cargo xtask web               # dist/web (Web-Tresor; erzeugt index.html + Tailwind-CSS)
+cargo xtask serve             # Web-Tresor mit Live-Reload (Port 8491)
 cargo run -p nrzpass-server   # http://localhost:8490
-scripts/build-mac.sh          # dist/mac/nrzPass-<version>-macOS.dmg
-scripts/build-extension.sh    # dist/extension/nrzPass-{chrome,firefox}-<version>.zip
-scripts/build-server.sh       # dist/server/nrzpass-{amd64,arm64}.gz
-scripts/umbrel-release.sh 1.0.1   # alles bauen, Zweig umbrel + Tag -> nrzStore aktualisiert sich
+cargo xtask mac               # dist/mac/nrzPass-<version>-macOS.dmg
+cargo xtask extension         # dist/extension/nrzPass-{chrome,firefox}-<version>.zip
+cargo xtask server            # dist/server/nrzpass-{amd64,arm64}.gz
+cargo xtask umbrel 1.0.1      # alles bauen, Zweig umbrel + Tag -> nrzStore aktualisiert sich
 cargo test                    # Kern + Server (inkl. kompletter API-Ablauf)
 ```
 
