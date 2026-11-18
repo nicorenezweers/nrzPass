@@ -1,0 +1,31 @@
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/server", "crates/web", "crates/desktop", "crates/extension"]
+default-members = ["crates/core", "crates/server"]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+nrzpass-core = { path = "crates/core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4", "serde"] }
+zeroize = { version = "1", features = ["derive"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
+
+# WASM (Web, Extension): volle Optimierung, damit Argon2id im Browser schnell bleibt
+[profile.wasm-release]
+inherits = "release"
+opt-level = 3
+lto = true

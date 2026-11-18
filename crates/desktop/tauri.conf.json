@@ -1,0 +1,60 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "nrzPass",
+  "version": "1.0.0",
+  "identifier": "ch.zweers.nrzpass",
+  "build": {
+    "frontendDist": "../../dist/web"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "nrzPass",
+        "width": 1180,
+        "height": 760,
+        "minWidth": 380,
+        "minHeight": 560,
+        "center": true,
+        "backgroundColor": "#141414",
+        "theme": "Dark"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+      "freezePrototype": true
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app",
+      "dmg"
+    ],
+    "category": "Utility",
+    "shortDescription": "Passwort-Manager, Vaultwarden-kompatibel",
+    "longDescription": "nrzPass: Zero-Knowledge-Passwort-Manager in Rust. Verbindet sich mit deinem nrzPass-Server und ist mit Vaultwarden/Bitwarden kompatibel.",
+    "copyright": "nrz",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.png"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJEQzc0OTBBQjU1RjQzNkEKUldScVExKzFDa25IdlNtZEwxTmp4T3FvTERiNUVmdVZIZmNvbVFPVTZJRW5ETHBteXNJYWVhMkQK",
+      "endpoints": [
+        "http://100.78.107.162:8390/nicorenezweers/nrzPass/raw/branch/umbrel/latest.json"
+      ],
+      "dangerousInsecureTransportProtocol": true
+    }
+  }
+}
