@@ -12,7 +12,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use state::{App, Phase};
 use std::time::Duration;
-use wasm_bindgen::JsCast;
+use wasm_bindgen::{JsCast, JsValue};
 
 #[component]
 fn Root() -> impl IntoView {
@@ -67,6 +67,10 @@ fn Root() -> impl IntoView {
 
     if env::is_popup() {
         let _ = doc.body().map(|b| b.class_list().add_1("popup"));
+        fit_popup();
+        let resize = wasm_bindgen::closure::Closure::<dyn Fn()>::new(fit_popup);
+        let _ = window().add_event_listener_with_callback("resize", resize.as_ref().unchecked_ref());
+        resize.forget();
     }
 
     view! {
@@ -79,6 +83,25 @@ fn Root() -> impl IntoView {
             Phase::Unlocked => view! { <ui::shell::Shell /> }.into_any(),
         }}
         <ui::shell::Toasts />
+    }
+}
+
+/// Popup an das tatsaechliche Fenster anpassen: der Browser kann es kleiner als 400x600 machen
+/// (Zoom, kleiner Bildschirm, Firefox-Ueberlaufmenue). Winzige Werte waehrend des Aufbaus ignorieren.
+fn fit_popup() {
+    let Some(body) = document().body() else { return };
+    let w = window();
+    let px = |v: Result<JsValue, JsValue>| v.ok().and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let style = body.style();
+    for (var, size, want, min) in [
+        ("--popup-w", px(w.inner_width()), 400.0, 240.0),
+        ("--popup-h", px(w.inner_height()), 600.0, 320.0),
+    ] {
+        if size >= min && size < want {
+            let _ = style.set_property(var, &format!("{}px", size.floor()));
+        } else {
+            let _ = style.remove_property(var);
+        }
     }
 }
 

@@ -12,7 +12,7 @@ fn AuthFrame(children: Children) -> impl IntoView {
     if crate::env::is_popup() {
         // Popup: kompakt, scrollt innen (feste Popup-Hoehe)
         return view! {
-            <div class="relative h-[600px] w-[400px] overflow-y-auto">
+            <div class="relative h-full w-full overflow-x-hidden overflow-y-auto">
                 <div class="drift pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true"><span class="drift-a"></span></div>
                 <div class="relative z-10 flex min-h-full flex-col justify-center gap-4 p-4">
                     <div class="flex items-center gap-3">

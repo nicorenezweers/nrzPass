@@ -281,7 +281,7 @@ pub fn Shell() -> impl IntoView {
     let popup = env::is_popup();
     let session = app.session;
     view! {
-        <div class=if popup { "flex h-[600px] w-[400px] flex-col overflow-hidden" } else { "flex h-dvh flex-col md:flex-row" }>
+        <div class=if popup { "flex h-full w-full min-w-0 flex-col overflow-hidden" } else { "flex h-dvh flex-col md:flex-row" }>
             // Seitenleiste (Desktop)
             {(!popup).then(|| view! {
                 <aside class="hidden w-60 shrink-0 flex-col border-r border-border bg-sidebar md:flex">
@@ -333,7 +333,7 @@ pub fn Shell() -> impl IntoView {
             // Schublade (Handy / Popup)
             <Show when=move || app.nav_open.get()>
                 <div class=if popup { "fixed inset-0 z-50 bg-black/60 fade-in" } else { "fixed inset-0 z-50 bg-black/60 fade-in md:hidden" } on:click=move |_| app.nav_open.set(false)>
-                    <div class=if popup { "h-full w-64 border-r border-border bg-sidebar sheet-in" } else { "h-full w-72 max-w-[85vw] border-r border-border bg-sidebar safe-top sheet-in" } on:click=|ev| ev.stop_propagation()>
+                    <div class=if popup { "h-full w-64 max-w-[85%] border-r border-border bg-sidebar sheet-in" } else { "h-full w-72 max-w-[85vw] border-r border-border bg-sidebar safe-top sheet-in" } on:click=|ev| ev.stop_propagation()>
                         <div class="flex items-center gap-2.5 px-4 pt-4">
                             <Logo class="size-7" />
                             <p class="truncate text-sm text-muted-foreground">{move || session.get().map(|s| s.email).unwrap_or_default()}</p>

@@ -23,6 +23,6 @@ web-sys = { version = "0.3", features = [
   "Window", "Document", "Element", "HtmlElement", "HtmlInputElement", "HtmlTextAreaElement", "HtmlAnchorElement",
   "HtmlSelectElement", "Storage", "Navigator", "Clipboard", "Location", "Headers", "Request", "RequestInit",
   "RequestMode", "Response", "KeyboardEvent", "MouseEvent", "Event", "EventTarget", "Blob", "BlobPropertyBag",
-  "Url", "File", "FileList", "DomTokenList", "Performance", "VisibilityState", "MediaQueryList", "Crypto", "HtmlDocument", "RequestCredentials", "RequestCache", "RequestRedirect",
+  "Url", "File", "FileList", "DomTokenList", "Performance", "VisibilityState", "MediaQueryList", "Crypto", "HtmlDocument", "RequestCredentials", "RequestCache", "RequestRedirect", "CssStyleDeclaration",
 ] }
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
