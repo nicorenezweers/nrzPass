@@ -14,4 +14,4 @@ Quellcode liegt auf `main`.
 | `update.json` | Update-Info für die Browser-Erweiterung |
 | `SHA256SUMS` | Prüfsummen |
 
-Stand: nrzPass 1.0.6, gebaut aus `cefb7f8` mit `scripts/umbrel-release.sh 1.0.6`.
+Stand: nrzPass 1.1.0, gebaut aus `62dc74c` mit `scripts/umbrel-release.sh 1.1.0`.
