@@ -20,7 +20,10 @@ sha2 = { version = "0.10", features = ["oid"] }
 hkdf = "0.12"
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 argon2 = { version = "0.5", default-features = false, features = ["alloc"] }
-rsa = { version = "0.9", default-features = false, features = ["std", "pem"] }
+rsa = { version = "0.10.0", default-features = false, features = ["std", "encoding"] }
+# rsa 0.10 nutzt digest 0.11 / rand_core 0.10 (nur fuer RSA-OAEP und Schluesselerzeugung)
+sha1_rsa = { package = "sha1", version = "0.11" }
+getrandom_rsa = { package = "getrandom", version = "0.4", features = ["sys_rng"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 getrandom = "0.2"
 subtle = "2"
@@ -28,4 +31,5 @@ thiserror = "2"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
+getrandom_rsa = { package = "getrandom", version = "0.4", features = ["sys_rng", "wasm_js"] }
 uuid = { version = "1", features = ["v4", "serde", "js"] }

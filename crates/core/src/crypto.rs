@@ -419,7 +419,7 @@ pub fn rewrap_user_key(user_key: &SymmetricKey, new_password: &str, email: &str,
 /// Erzeugt ein RSA-2048-Schluesselpaar (SPKI-DER oeffentlich, PKCS#8-DER privat).
 pub fn generate_rsa_keypair() -> Result<(Vec<u8>, Zeroizing<Vec<u8>>)> {
     use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey};
-    let private = rsa::RsaPrivateKey::new(&mut OsRng, 2048).map_err(|e| CryptoError::Rsa(e.to_string()))?;
+    let private = rsa::PrivateKey::new(&mut getrandom_rsa::SysRng, 2048).map_err(|e| CryptoError::Rsa(e.to_string()))?;
     let public = private
         .to_public_key()
         .to_public_key_der()
@@ -430,21 +430,21 @@ pub fn generate_rsa_keypair() -> Result<(Vec<u8>, Zeroizing<Vec<u8>>)> {
 }
 
 /// Privater RSA-Schluessel des Kontos (zum Entschluesseln von Organisationsschluesseln).
-pub struct PrivateKey(rsa::RsaPrivateKey);
+pub struct PrivateKey(rsa::PrivateKey);
 
 impl PrivateKey {
     pub fn from_encrypted(user_key: &SymmetricKey, enc: &str) -> Result<PrivateKey> {
         use rsa::pkcs8::DecodePrivateKey;
         let der = user_key.decrypt(&enc.parse()?)?;
-        let key = rsa::RsaPrivateKey::from_pkcs8_der(&der).map_err(|e| CryptoError::Rsa(e.to_string()))?;
+        let key = rsa::PrivateKey::from_pkcs8_der(&der).map_err(|e| CryptoError::Rsa(e.to_string()))?;
         Ok(PrivateKey(key))
     }
 
     pub fn decrypt_org_key(&self, enc: &str) -> Result<SymmetricKey> {
         let enc: EncString = enc.parse()?;
         let raw = match &enc {
-            EncString::Rsa { kind: 4, data } => self.0.decrypt(rsa::Oaep::new::<sha1::Sha1>(), data),
-            EncString::Rsa { kind: 3, data } => self.0.decrypt(rsa::Oaep::new::<Sha256>(), data),
+            EncString::Rsa { kind: 4, data } => self.0.decrypt(rsa::Oaep::<sha1_rsa::Sha1>::new(), data),
+            EncString::Rsa { kind: 3, data } => self.0.decrypt(rsa::Oaep::<rsa::sha2::Sha256>::new(), data),
             EncString::Rsa { kind, .. } => return Err(CryptoError::UnsupportedType(*kind)),
             _ => return Err(CryptoError::UnsupportedType(2)),
         }
@@ -562,9 +562,9 @@ mod tests {
         let enc_priv = uk.encrypt(&private).to_string();
         let pk = PrivateKey::from_encrypted(&uk, &enc_priv).unwrap();
         use rsa::pkcs8::DecodePublicKey;
-        let pubk = rsa::RsaPublicKey::from_public_key_der(&public).unwrap();
+        let pubk = rsa::PublicKey::from_public_key_der(&public).unwrap();
         let org = SymmetricKey::generate();
-        let ct = pubk.encrypt(&mut OsRng, rsa::Oaep::new::<sha1::Sha1>(), &org.to_bytes()).unwrap();
+        let ct = pubk.encrypt(&mut getrandom_rsa::SysRng, rsa::Oaep::<sha1_rsa::Sha1>::new(), &org.to_bytes()).unwrap();
         let s = EncString::Rsa { kind: 4, data: ct }.to_string();
         assert_eq!(pk.decrypt_org_key(&s).unwrap(), org);
     }
